@@ -1,12 +1,11 @@
 import warnings
 
 from django.core.serializers.json import DjangoJSONEncoder
-from django.utils.encoding import force_text
 import types
 
 from django.utils.functional import Promise
 
-from .compat import json
+from .compat import json, force_text
 from .iterators import iterlist
 
 
