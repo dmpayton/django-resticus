@@ -67,7 +67,7 @@ class Endpoint(View):
     streaming = None
 
     def parse_body(self, request):
-        if request.method not in ["POST", "PUT", "PATCH"]:
+        if request.method not in ["POST", "PUT", "PATCH", "DELETE"]:
             return (None, None)
 
         content_type, params = parse_content_type(request.content_type)
