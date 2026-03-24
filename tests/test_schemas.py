@@ -1,7 +1,10 @@
 import pytest
 from django.test import TestCase, override_settings
+from django.urls import path
 from resticus.views import Endpoint
 from resticus.settings import api_settings
+from resticus import generics
+from resticus.schemas import SchemaGenerator
 
 
 class TestDocumentedAttribute(TestCase):
@@ -19,3 +22,59 @@ class TestDocumentedAttribute(TestCase):
         # api_settings via reload_api_settings. Verify the live singleton reflects it.
         from resticus.settings import api_settings as live_settings
         assert live_settings.DOCUMENTED is False
+
+
+class DocumentedView(generics.ListEndpoint):
+    """A documented endpoint."""
+    model = None
+    documented = True
+
+    def get_queryset(self):
+        return []
+
+
+class HiddenView(Endpoint):
+    documented = False
+
+    def get(self, request):
+        return {}
+
+
+test_urlconf_patterns = [
+    path('items/', DocumentedView.as_view(), name='item-list'),
+    path('hidden/', HiddenView.as_view(), name='hidden'),
+]
+
+
+class FakeURLConf:
+    urlpatterns = test_urlconf_patterns
+
+
+class TestSchemaGeneratorTraversal(TestCase):
+    def setUp(self):
+        self.generator = SchemaGenerator(
+            title='Test API',
+            version='1.0',
+            urlconf=FakeURLConf,
+        )
+
+    def test_documented_endpoint_appears_in_paths(self):
+        schema = self.generator.get_schema()
+        assert '/items/' in schema['paths']
+
+    def test_undocumented_endpoint_excluded_from_paths(self):
+        schema = self.generator.get_schema()
+        assert '/hidden/' not in schema['paths']
+
+    def test_schema_has_openapi_version(self):
+        schema = self.generator.get_schema()
+        assert schema['openapi'] == '3.1.0'
+
+    def test_schema_has_info_block(self):
+        schema = self.generator.get_schema()
+        assert schema['info']['title'] == 'Test API'
+        assert schema['info']['version'] == '1.0'
+
+    def test_schema_has_security_schemes(self):
+        schema = self.generator.get_schema()
+        assert 'sessionAuth' in schema['components']['securitySchemes']
