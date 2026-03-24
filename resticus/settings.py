@@ -15,6 +15,8 @@ DEFAULTS = {
     "JSON_DECODER": "resticus.encoders.JSONDecoder",
     "JSON_ENCODER": "resticus.encoders.JSONEncoder",
     "LOGIN_REQUIRED": False,
+    "DOCUMENTED": True,
+    "DOCS_UI": "scalar",
     "TOKEN_MODEL": None,
     "DATA_PARSERS": {
         "application/json": "resticus.parsers.parse_json",
