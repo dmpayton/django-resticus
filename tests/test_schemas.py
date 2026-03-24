@@ -40,8 +40,16 @@ class HiddenView(Endpoint):
         return {}
 
 
+class DetailView(generics.DetailEndpoint):
+    model = None
+
+    def get_object(self):
+        return None
+
+
 test_urlconf_patterns = [
     path('items/', DocumentedView.as_view(), name='item-list'),
+    path('items/<int:pk>/', DetailView.as_view(), name='item-detail'),
     path('hidden/', HiddenView.as_view(), name='hidden'),
 ]
 
@@ -78,3 +86,9 @@ class TestSchemaGeneratorTraversal(TestCase):
     def test_schema_has_security_schemes(self):
         schema = self.generator.get_schema()
         assert 'sessionAuth' in schema['components']['securitySchemes']
+
+    def test_path_parameters_converted_to_openapi_style(self):
+        schema = self.generator.get_schema()
+        assert '/items/{pk}/' in schema['paths']
+        params = schema['paths']['/items/{pk}/']['get']['parameters']
+        assert any(p['name'] == 'pk' and p['in'] == 'path' for p in params)
