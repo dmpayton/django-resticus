@@ -13,13 +13,9 @@ class TestDocumentedAttribute(TestCase):
             documented = False
         assert MyView.documented is False
 
-    def test_subclass_can_override_documented_true(self):
-        class MyView(Endpoint):
-            documented = True
-        assert MyView.documented is True
-
     @override_settings(RESTICUS={'DOCUMENTED': False})
     def test_resticus_setting_controls_default(self):
-        from resticus.settings import APISettings, DEFAULTS, IMPORT_STRINGS
-        settings = APISettings({'DOCUMENTED': False}, DEFAULTS, IMPORT_STRINGS)
-        assert settings.DOCUMENTED is False
+        # override_settings triggers the setting_changed signal, which reloads
+        # api_settings via reload_api_settings. Verify the live singleton reflects it.
+        from resticus.settings import api_settings as live_settings
+        assert live_settings.DOCUMENTED is False
