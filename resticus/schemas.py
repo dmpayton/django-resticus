@@ -231,16 +231,19 @@ class SchemaGenerator:
 
     def _build_operation(self, view_class, method, path_params,
                          form_fields=None, has_write=False):
-        """Build one operation dict."""
         form_fields = form_fields or []
         method_func = getattr(view_class, method, None)
         summary = (getattr(method_func, '__doc__', None) or '').strip()
+
+        # Auth: same logic as Endpoint.authenticate()
+        method_login_required = getattr(
+            method_func, 'login_required', view_class.login_required
+        )
 
         parameters = list(path_params)
 
         if method == 'get':
             parameters += _get_filter_query_params(view_class)
-            # Form fields go as query params only on GET-only endpoints
             if form_fields and not has_write:
                 parameters += _form_fields_to_query_params(form_fields)
 
@@ -249,9 +252,11 @@ class SchemaGenerator:
             'responses': {'200': {'description': 'OK'}},
         }
 
-        # Request body on write methods
         if method in ('post', 'put', 'patch') and form_fields:
             operation['requestBody'] = _form_fields_to_request_body(form_fields)
+
+        if method_login_required:
+            operation['security'] = [{'sessionAuth': []}]
 
         if summary:
             operation['summary'] = summary

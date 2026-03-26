@@ -184,3 +184,54 @@ class TestFormIntrospection(TestCase):
         for p in params:
             if p['name'] == 'name':
                 assert p['in'] == 'query'
+
+
+class AuthRequiredView(Endpoint):
+    login_required = True
+
+    def get(self, request):
+        return {}
+
+
+class PerMethodAuthView(Endpoint):
+    login_required = False
+
+    def get(self, request):
+        return {}
+
+    def post(self, request):
+        return {}
+
+
+# Set login_required only on get
+PerMethodAuthView.get.login_required = True
+
+
+auth_urlconf_patterns = [
+    path('secure/', AuthRequiredView.as_view(), name='secure'),
+    path('mixed/', PerMethodAuthView.as_view(), name='mixed'),
+]
+
+
+class FakeAuthURLConf:
+    urlpatterns = auth_urlconf_patterns
+
+
+class TestAuthIntrospection(TestCase):
+    def setUp(self):
+        self.generator = SchemaGenerator(urlconf=FakeAuthURLConf)
+        self.schema = self.generator.get_schema()
+
+    def test_class_level_login_required_adds_security(self):
+        get_op = self.schema['paths']['/secure/']['get']
+        assert 'security' in get_op
+        assert {'sessionAuth': []} in get_op['security']
+
+    def test_unauthenticated_endpoint_has_no_security(self):
+        post_op = self.schema['paths']['/mixed/']['post']
+        assert 'security' not in post_op or post_op.get('security') == []
+
+    def test_per_method_login_required_adds_security_to_that_method(self):
+        get_op = self.schema['paths']['/mixed/']['get']
+        assert 'security' in get_op
+        assert {'sessionAuth': []} in get_op['security']
