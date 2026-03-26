@@ -3,6 +3,7 @@ from django.contrib import auth
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import HttpResponse, JsonResponse, StreamingHttpResponse, Http404
+from django.template.response import TemplateResponse
 
 from django.utils.decorators import method_decorator
 from django.utils.translation import gettext as _
@@ -17,7 +18,7 @@ from .permissions import AllowAny
 from .serializers import serialize
 from .settings import api_settings
 
-__all__ = ["Endpoint", "SessionAuthEndpoint", "TokenAuthEndpoint", "OpenAPISchemaView"]
+__all__ = ["Endpoint", "SessionAuthEndpoint", "TokenAuthEndpoint", "OpenAPISchemaView", "DocsView"]
 
 
 class Endpoint(View):
@@ -313,6 +314,36 @@ class TokenAuthEndpoint(Endpoint):
         TokenModel = TokenAuth.get_token_model()
         token, created = TokenModel.objects.get_or_create(user=request.user)
         return token
+
+
+class DocsView(Endpoint):
+    """Serves an API documentation UI pointing at the OpenAPI schema."""
+    documented = False
+    permission_classes = [AllowAny]
+    login_required = False
+
+    VALID_UIS = ('scalar', 'swagger', 'redoc', 'elements')
+
+    ui = api_settings.DOCS_UI
+    schema_url = None
+    title = 'API Documentation'
+
+    def setup(self, request, *args, **kwargs):
+        super().setup(request, *args, **kwargs)
+        if self.ui not in self.VALID_UIS:
+            raise ValueError(
+                f'Unknown API docs UI: {self.ui!r}. '
+                f'Available: {", ".join(self.VALID_UIS)}'
+            )
+
+    def get(self, request):
+        template_name = f'resticus/docs/{self.ui}.html'
+        response = TemplateResponse(request, template_name, {
+            'schema_url': self.schema_url,
+            'title': self.title,
+        })
+        response.render()
+        return response
 
 
 class OpenAPISchemaView(Endpoint):

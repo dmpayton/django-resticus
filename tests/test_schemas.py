@@ -270,3 +270,53 @@ class TestOpenAPISchemaView(TestCase):
 
     def test_schema_view_is_not_documented(self):
         assert OpenAPISchemaView.documented is False
+
+
+from resticus.views import DocsView
+
+
+class TestDocsView(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def _get(self, ui='scalar'):
+        view = DocsView.as_view(
+            ui=ui,
+            schema_url='/api/2.0/openapi.json',
+            title='Test API',
+        )
+        request = self.factory.get('/docs/')
+        return view(request)
+
+    def test_scalar_returns_html(self):
+        response = self._get('scalar')
+        assert response.status_code == 200
+        assert 'text/html' in response['Content-Type']
+        assert b'@scalar/api-reference' in response.content
+
+    def test_swagger_returns_html(self):
+        response = self._get('swagger')
+        assert b'swagger-ui-bundle' in response.content
+
+    def test_redoc_returns_html(self):
+        response = self._get('redoc')
+        assert b'redoc.standalone' in response.content
+
+    def test_elements_returns_html(self):
+        response = self._get('elements')
+        assert b'stoplight/elements' in response.content
+
+    def test_schema_url_is_embedded(self):
+        response = self._get('scalar')
+        assert b'/api/2.0/openapi.json' in response.content
+
+    def test_title_is_embedded(self):
+        response = self._get('scalar')
+        assert b'Test API' in response.content
+
+    def test_unknown_ui_raises(self):
+        with pytest.raises((ValueError, KeyError)):
+            self._get('nonexistent')
+
+    def test_docs_view_is_not_documented(self):
+        assert DocsView.documented is False
