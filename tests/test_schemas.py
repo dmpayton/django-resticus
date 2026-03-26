@@ -5,6 +5,7 @@ from resticus.views import Endpoint
 from resticus.settings import api_settings
 from resticus import generics
 from resticus.schemas import SchemaGenerator
+from tests.testapp.filters import BookFilter
 
 
 class TestDocumentedAttribute(TestCase):
@@ -92,3 +93,46 @@ class TestSchemaGeneratorTraversal(TestCase):
         assert '/items/{pk}/' in schema['paths']
         params = schema['paths']['/items/{pk}/']['get']['parameters']
         assert any(p['name'] == 'pk' and p['in'] == 'path' for p in params)
+
+
+class FilteredView(generics.ListEndpoint):
+    model = None
+    filter_class = BookFilter
+
+    def get_queryset(self):
+        return []
+
+
+filtered_urlconf_patterns = [
+    path('books/', FilteredView.as_view(), name='book-list'),
+]
+
+
+class FakeFilteredURLConf:
+    urlpatterns = filtered_urlconf_patterns
+
+
+class TestFilterIntrospection(TestCase):
+    def setUp(self):
+        self.generator = SchemaGenerator(urlconf=FakeFilteredURLConf)
+
+    def test_filter_fields_appear_as_query_params(self):
+        schema = self.generator.get_schema()
+        params = schema['paths']['/books/']['get']['parameters']
+        param_names = [p['name'] for p in params]
+        assert 'price' in param_names or any('price' in n for n in param_names)
+
+    def test_filter_params_have_in_query(self):
+        schema = self.generator.get_schema()
+        params = schema['paths']['/books/']['get']['parameters']
+        query_params = [p for p in params if p['in'] == 'query']
+        assert len(query_params) > 0
+
+    def test_filter_lookup_suffixes_are_separate_params(self):
+        schema = self.generator.get_schema()
+        params = schema['paths']['/books/']['get']['parameters']
+        param_names = [p['name'] for p in params]
+        # BookFilter has price__exact, price__lt, price__lte, price__gt, price__gte
+        # Check that at least two price-related params exist
+        price_params = [n for n in param_names if 'price' in n]
+        assert len(price_params) >= 2

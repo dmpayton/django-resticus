@@ -1,8 +1,59 @@
 import re
 
+from django import forms as django_forms
 from django.conf import settings
 from django.contrib.admindocs.views import simplify_regex
 from django.urls import URLPattern, URLResolver
+
+
+FORM_FIELD_TYPE_MAP = {
+    django_forms.CharField: {'type': 'string'},
+    django_forms.SlugField: {'type': 'string'},
+    django_forms.URLField: {'type': 'string'},
+    django_forms.EmailField: {'type': 'string'},
+    django_forms.RegexField: {'type': 'string'},
+    django_forms.IntegerField: {'type': 'integer'},
+    django_forms.FloatField: {'type': 'number'},
+    django_forms.DecimalField: {'type': 'number'},
+    django_forms.BooleanField: {'type': 'boolean'},
+    django_forms.DateField: {'type': 'string', 'format': 'date'},
+    django_forms.DateTimeField: {'type': 'string', 'format': 'date-time'},
+}
+
+
+def _form_field_to_schema(field):
+    """Map a Django form field instance to an OpenAPI schema dict."""
+    # ChoiceField first — it's a subclass of Field and needs special handling
+    if isinstance(field, django_forms.ChoiceField):
+        choices = [c[0] for c in field.choices if c[0] != '']
+        schema = {'type': 'string'}
+        if choices:
+            schema['enum'] = [str(c) for c in choices]
+        return schema
+
+    for field_class, schema in FORM_FIELD_TYPE_MAP.items():
+        if isinstance(field, field_class):
+            return dict(schema)  # copy to avoid mutation
+
+    return {'type': 'string'}  # safe fallback
+
+
+def _get_filter_query_params(view_class):
+    """Return OpenAPI query parameter dicts from a view's filter_class."""
+    filter_class = getattr(view_class, 'filter_class', None)
+    if filter_class is None:
+        return []
+
+    params = []
+    for filter_name, filter_instance in filter_class.get_filters().items():
+        schema = _form_field_to_schema(filter_instance.field)
+        params.append({
+            'name': filter_name,
+            'in': 'query',
+            'required': False,
+            'schema': schema,
+        })
+    return params
 
 
 def _import_urlconf(urlconf):
@@ -130,12 +181,16 @@ class SchemaGenerator:
         return item
 
     def _build_operation(self, view_class, method, path_params):
-        """Build one operation dict. Introspection details added in later tasks."""
+        """Build one operation dict."""
         method_func = getattr(view_class, method, None)
         summary = (getattr(method_func, '__doc__', None) or '').strip()
 
+        parameters = list(path_params)
+        if method == 'get':
+            parameters += _get_filter_query_params(view_class)
+
         operation = {
-            'parameters': list(path_params),
+            'parameters': parameters,
             'responses': {'200': {'description': 'OK'}},
         }
         if summary:
