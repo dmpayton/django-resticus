@@ -136,3 +136,51 @@ class TestFilterIntrospection(TestCase):
         # Check that at least two price-related params exist
         price_params = [n for n in param_names if 'price' in n]
         assert len(price_params) >= 2
+
+
+from tests.testapp.forms import AuthorForm
+from tests.testapp.views import AuthorList   # ListCreateEndpoint with form_class=AuthorForm
+
+
+class GetOnlyFormView(Endpoint):
+    """GET-only endpoint with a form_class."""
+    form_class = AuthorForm
+
+    def get(self, request):
+        return {}
+
+
+form_urlconf_patterns = [
+    path('authors/', AuthorList.as_view(), name='author-list'),
+    path('search/', GetOnlyFormView.as_view(), name='author-search'),
+]
+
+
+class FakeFormURLConf:
+    urlpatterns = form_urlconf_patterns
+
+
+class TestFormIntrospection(TestCase):
+    def setUp(self):
+        self.generator = SchemaGenerator(urlconf=FakeFormURLConf)
+        self.schema = self.generator.get_schema()
+
+    def test_post_endpoint_has_request_body(self):
+        # AuthorList is a ListCreateEndpoint (has post)
+        assert 'requestBody' in self.schema['paths']['/authors/']['post']
+
+    def test_request_body_contains_form_fields(self):
+        body = self.schema['paths']['/authors/']['post']['requestBody']
+        props = body['content']['application/json']['schema']['properties']
+        assert 'name' in props
+
+    def test_get_only_form_fields_become_query_params(self):
+        params = self.schema['paths']['/search/']['get']['parameters']
+        param_names = [p['name'] for p in params]
+        assert 'name' in param_names
+
+    def test_get_only_form_params_have_in_query(self):
+        params = self.schema['paths']['/search/']['get']['parameters']
+        for p in params:
+            if p['name'] == 'name':
+                assert p['in'] == 'query'

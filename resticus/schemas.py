@@ -38,6 +38,51 @@ def _form_field_to_schema(field):
     return {'type': 'string'}  # safe fallback
 
 
+def _get_form_fields(view_class):
+    """Return list of (name, field) from view_class.form_class, or empty list."""
+    form_class = getattr(view_class, 'form_class', None)
+    if form_class is None:
+        return []
+    try:
+        form = form_class()
+        return list(form.fields.items())
+    except Exception:
+        return []
+
+
+def _form_fields_to_query_params(fields):
+    """Convert Django form fields to OpenAPI query parameter dicts."""
+    return [
+        {
+            'name': name,
+            'in': 'query',
+            'required': field.required,
+            'schema': _form_field_to_schema(field),
+        }
+        for name, field in fields
+    ]
+
+
+def _form_fields_to_request_body(fields):
+    """Convert Django form fields to an OpenAPI requestBody dict."""
+    properties = {name: _form_field_to_schema(field) for name, field in fields}
+    required = [name for name, field in fields if field.required]
+    schema = {'type': 'object', 'properties': properties}
+    if required:
+        schema['required'] = required
+    return {
+        'required': True,
+        'content': {
+            'application/json': {'schema': schema}
+        }
+    }
+
+
+def _has_write_method(view_class):
+    """Return True if the view has any write HTTP method."""
+    return any(hasattr(view_class, m) for m in ('post', 'put', 'patch'))
+
+
 def _get_filter_query_params(view_class):
     """Return OpenAPI query parameter dicts from a view's filter_class."""
     filter_class = getattr(view_class, 'filter_class', None)
@@ -163,12 +208,16 @@ class SchemaGenerator:
         path_params = _extract_path_params(openapi_path)
         description = (view_class.__doc__ or '').strip()
 
+        # Pre-compute form fields once for the view
+        form_fields = _get_form_fields(view_class)
+        has_write = _has_write_method(view_class)
+
         http_methods = ['get', 'post', 'put', 'patch', 'delete']
         operations = {}
         for method in http_methods:
             if hasattr(view_class, method):
                 operations[method] = self._build_operation(
-                    view_class, method, path_params
+                    view_class, method, path_params, form_fields, has_write
                 )
 
         if not operations:
@@ -180,19 +229,31 @@ class SchemaGenerator:
         item.update(operations)
         return item
 
-    def _build_operation(self, view_class, method, path_params):
+    def _build_operation(self, view_class, method, path_params,
+                         form_fields=None, has_write=False):
         """Build one operation dict."""
+        form_fields = form_fields or []
         method_func = getattr(view_class, method, None)
         summary = (getattr(method_func, '__doc__', None) or '').strip()
 
         parameters = list(path_params)
+
         if method == 'get':
             parameters += _get_filter_query_params(view_class)
+            # Form fields go as query params only on GET-only endpoints
+            if form_fields and not has_write:
+                parameters += _form_fields_to_query_params(form_fields)
 
         operation = {
             'parameters': parameters,
             'responses': {'200': {'description': 'OK'}},
         }
+
+        # Request body on write methods
+        if method in ('post', 'put', 'patch') and form_fields:
+            operation['requestBody'] = _form_fields_to_request_body(form_fields)
+
         if summary:
             operation['summary'] = summary
+
         return operation
