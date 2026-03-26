@@ -235,3 +235,38 @@ class TestAuthIntrospection(TestCase):
         get_op = self.schema['paths']['/mixed/']['get']
         assert 'security' in get_op
         assert {'sessionAuth': []} in get_op['security']
+
+
+from django.test import RequestFactory
+from resticus.views import OpenAPISchemaView
+
+
+class TestOpenAPISchemaView(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def test_returns_json_response(self):
+        view = OpenAPISchemaView.as_view(
+            title='Test',
+            version='1.0',
+            urlconf=FakeURLConf,
+        )
+        request = self.factory.get('/openapi.json')
+        response = view(request)
+        assert response.status_code == 200
+        assert 'application/json' in response['Content-Type']
+
+    def test_prefix_derived_from_request_path(self):
+        import json
+        view = OpenAPISchemaView.as_view(
+            title='Test',
+            version='1.0',
+            urlconf=FakeURLConf,
+        )
+        request = self.factory.get('/api/2.0/openapi.json')
+        response = view(request)
+        schema = json.loads(response.content)
+        assert schema['servers'] == [{'url': '/api/2.0/'}]
+
+    def test_schema_view_is_not_documented(self):
+        assert OpenAPISchemaView.documented is False
