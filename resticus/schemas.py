@@ -98,6 +98,27 @@ def _get_uses_form(view_class):
     return False
 
 
+def _get_pagination_query_params(view_class):
+    """Return OpenAPI query parameter dicts for pagination if the view paginates."""
+    if not getattr(view_class, 'paginate', False):
+        return []
+    params = [{
+        'name': getattr(view_class, 'page_query_param', 'page'),
+        'in': 'query',
+        'required': False,
+        'schema': {'type': 'integer'},
+    }]
+    page_size_param = getattr(view_class, 'page_size_query_param', None)
+    if page_size_param:
+        params.append({
+            'name': page_size_param,
+            'in': 'query',
+            'required': False,
+            'schema': {'type': 'integer'},
+        })
+    return params
+
+
 def _get_filter_query_params(view_class):
     """Return OpenAPI query parameter dicts from a view's filter_class."""
     filter_class = getattr(view_class, 'filter_class', None)
@@ -271,6 +292,7 @@ class SchemaGenerator:
         parameters = list(path_params)
 
         if method == 'get':
+            parameters += _get_pagination_query_params(view_class)
             parameters += _get_filter_query_params(view_class)
             if form_fields and get_uses_form:
                 parameters += _form_fields_to_query_params(form_fields)

@@ -137,6 +137,43 @@ class TestFilterIntrospection(TestCase):
         price_params = [n for n in param_names if 'price' in n]
         assert len(price_params) >= 2
 
+    def test_paginated_view_has_page_param(self):
+        schema = self.generator.get_schema()
+        params = schema['paths']['/books/']['get']['parameters']
+        param_names = [p['name'] for p in params]
+        assert 'page' in param_names
+
+    def test_page_param_is_integer(self):
+        schema = self.generator.get_schema()
+        params = schema['paths']['/books/']['get']['parameters']
+        page_param = next(p for p in params if p['name'] == 'page')
+        assert page_param['schema']['type'] == 'integer'
+
+
+class NonPaginatedView(generics.ListEndpoint):
+    model = None
+    paginate = False
+
+    def get_queryset(self):
+        return []
+
+
+non_paginated_urlconf_patterns = [
+    path('items/', NonPaginatedView.as_view(), name='item-list'),
+]
+
+
+class FakeNonPaginatedURLConf:
+    urlpatterns = non_paginated_urlconf_patterns
+
+
+class TestPaginationIntrospection(TestCase):
+    def test_non_paginated_view_has_no_page_param(self):
+        schema = SchemaGenerator(urlconf=FakeNonPaginatedURLConf).get_schema()
+        params = schema['paths']['/items/']['get']['parameters']
+        param_names = [p['name'] for p in params]
+        assert 'page' not in param_names
+
 
 from tests.testapp.forms import AuthorForm
 from tests.testapp.views import AuthorList   # ListCreateEndpoint with form_class=AuthorForm
