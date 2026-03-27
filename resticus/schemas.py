@@ -122,6 +122,13 @@ def _extract_path_params(openapi_path):
     ]
 
 
+def _derive_tags_from_path(openapi_path):
+    """Derive a tag from the first non-empty path segment."""
+    parts = openapi_path.strip('/').split('/')
+    first = parts[0] if parts else ''
+    return [first] if first else []
+
+
 class SchemaGenerator:
     def __init__(self, title=None, description=None, version=None,
                  prefix=None, urlconf=None):
@@ -208,16 +215,16 @@ class SchemaGenerator:
         path_params = _extract_path_params(openapi_path)
         description = (view_class.__doc__ or '').strip()
 
-        # Pre-compute form fields once for the view
         form_fields = _get_form_fields(view_class)
         has_write = _has_write_method(view_class)
+        tags = list(view_class.tags) if getattr(view_class, 'tags', None) else _derive_tags_from_path(openapi_path)
 
         http_methods = ['get', 'post', 'put', 'patch', 'delete']
         operations = {}
         for method in http_methods:
             if hasattr(view_class, method):
                 operations[method] = self._build_operation(
-                    view_class, method, path_params, form_fields, has_write
+                    view_class, method, path_params, form_fields, has_write, tags
                 )
 
         if not operations:
@@ -230,10 +237,16 @@ class SchemaGenerator:
         return item
 
     def _build_operation(self, view_class, method, path_params,
-                         form_fields=None, has_write=False):
+                         form_fields=None, has_write=False, tags=None):
         form_fields = form_fields or []
         method_func = getattr(view_class, method, None)
-        summary = (getattr(method_func, '__doc__', None) or '').strip()
+
+        # Only use the docstring if this class defines the method itself,
+        # not if it's inherited from a base class.
+        if method in view_class.__dict__:
+            summary = (getattr(method_func, '__doc__', None) or '').strip()
+        else:
+            summary = ''
 
         # Auth: same logic as Endpoint.authenticate()
         method_login_required = getattr(
@@ -257,6 +270,9 @@ class SchemaGenerator:
 
         if method_login_required:
             operation['security'] = [{'sessionAuth': []}]
+
+        if tags:
+            operation['tags'] = tags
 
         if summary:
             operation['summary'] = summary

@@ -320,3 +320,82 @@ class TestDocsView(TestCase):
 
     def test_docs_view_is_not_documented(self):
         assert DocsView.documented is False
+
+
+class InheritedDocView(generics.ListEndpoint):
+    """Class docstring."""
+    model = None
+    # get() is inherited from ListEndpoint — do NOT define it here
+
+    def get_queryset(self):
+        return []
+
+
+class OwnDocView(Endpoint):
+    """Class docstring."""
+
+    def get(self, request):
+        """My own summary."""
+        return {}
+
+
+inherited_doc_urlconf_patterns = [
+    path('inherited/', InheritedDocView.as_view(), name='inherited'),
+    path('own/', OwnDocView.as_view(), name='own'),
+]
+
+
+class FakeInheritedDocURLConf:
+    urlpatterns = inherited_doc_urlconf_patterns
+
+
+class TaggedView(Endpoint):
+    tags = ['custom']
+
+    def get(self, request):
+        return {}
+
+
+tagged_urlconf_patterns = [
+    path('monitors/', DocumentedView.as_view(), name='monitors'),
+    path('monitors/<int:pk>/', DetailView.as_view(), name='monitor-detail'),
+    path('tagged/', TaggedView.as_view(), name='tagged'),
+]
+
+
+class FakeTaggedURLConf:
+    urlpatterns = tagged_urlconf_patterns
+
+
+class TestInheritedSummary(TestCase):
+    def setUp(self):
+        self.generator = SchemaGenerator(urlconf=FakeInheritedDocURLConf)
+        self.schema = self.generator.get_schema()
+
+    def test_inherited_method_docstring_not_used(self):
+        # get() is inherited from ListEndpoint; its docstring should NOT appear
+        get_op = self.schema['paths']['/inherited/']['get']
+        assert 'summary' not in get_op
+
+    def test_own_method_docstring_is_used(self):
+        # get() is defined directly on OwnDocView
+        get_op = self.schema['paths']['/own/']['get']
+        assert get_op.get('summary') == 'My own summary.'
+
+
+class TestTags(TestCase):
+    def setUp(self):
+        self.generator = SchemaGenerator(urlconf=FakeTaggedURLConf)
+        self.schema = self.generator.get_schema()
+
+    def test_tag_auto_derived_from_first_path_segment(self):
+        get_op = self.schema['paths']['/monitors/']['get']
+        assert get_op.get('tags') == ['monitors']
+
+    def test_tag_auto_derived_for_detail_path(self):
+        get_op = self.schema['paths']['/monitors/{pk}/']['get']
+        assert get_op.get('tags') == ['monitors']
+
+    def test_class_tags_override_derived(self):
+        get_op = self.schema['paths']['/tagged/']['get']
+        assert get_op.get('tags') == ['custom']

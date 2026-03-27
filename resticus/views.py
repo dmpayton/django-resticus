@@ -59,6 +59,7 @@ class Endpoint(View):
     authentication_classes = api_settings.DEFAULT_AUTHENTICATION_CLASSES
     login_required = api_settings.LOGIN_REQUIRED
     documented = api_settings.DOCUMENTED
+    tags = []
     permission_classes = api_settings.DEFAULT_PERMISSION_CLASSES
     data_parsers = api_settings.DATA_PARSERS
 
