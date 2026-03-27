@@ -399,3 +399,11 @@ class TestTags(TestCase):
     def test_class_tags_override_derived(self):
         get_op = self.schema['paths']['/tagged/']['get']
         assert get_op.get('tags') == ['custom']
+
+    def test_no_tags_emitted_for_root_path(self):
+        root_view = type('RootView', (Endpoint,), {'get': lambda self, r: {}})
+        root_conf = type('Conf', (), {'urlpatterns': [path('', root_view.as_view())]})
+        schema = SchemaGenerator(urlconf=root_conf).get_schema()
+        # Root path '/' has no meaningful first segment — tags key must be absent
+        op = list(schema['paths'].values())[0]['get']
+        assert 'tags' not in op
