@@ -83,6 +83,21 @@ def _has_write_method(view_class):
     return any(hasattr(view_class, m) for m in ('post', 'put', 'patch'))
 
 
+def _get_uses_form(view_class):
+    """Return True if the view's GET handler uses form_class for query params.
+
+    Walks the MRO to find the class that defines `get`. If that class also
+    owns `form_class` or `process_form`, the form fields should be exposed as
+    GET query parameters. This distinguishes export-style endpoints (where GET
+    accepts form fields as query params) from list-create endpoints (where the
+    form is only used for the POST body).
+    """
+    for cls in view_class.__mro__:
+        if 'get' in cls.__dict__:
+            return 'form_class' in cls.__dict__ or 'process_form' in cls.__dict__
+    return False
+
+
 def _get_filter_query_params(view_class):
     """Return OpenAPI query parameter dicts from a view's filter_class."""
     filter_class = getattr(view_class, 'filter_class', None)
@@ -216,7 +231,7 @@ class SchemaGenerator:
         description = (view_class.__doc__ or '').strip()
 
         form_fields = _get_form_fields(view_class)
-        has_write = _has_write_method(view_class)
+        get_uses_form = _get_uses_form(view_class)
         tags = list(view_class.tags) if getattr(view_class, 'tags', None) else _derive_tags_from_path(openapi_path)
 
         http_methods = ['get', 'post', 'put', 'patch', 'delete']
@@ -224,7 +239,7 @@ class SchemaGenerator:
         for method in http_methods:
             if hasattr(view_class, method):
                 operations[method] = self._build_operation(
-                    view_class, method, path_params, form_fields, has_write, tags,
+                    view_class, method, path_params, form_fields, get_uses_form, tags,
                     description=description,
                 )
 
@@ -236,7 +251,7 @@ class SchemaGenerator:
         return item
 
     def _build_operation(self, view_class, method, path_params,
-                         form_fields=None, has_write=False, tags=None,
+                         form_fields=None, get_uses_form=False, tags=None,
                          description=None):
         form_fields = form_fields or []
         method_func = getattr(view_class, method, None)
@@ -257,7 +272,7 @@ class SchemaGenerator:
 
         if method == 'get':
             parameters += _get_filter_query_params(view_class)
-            if form_fields and not has_write:
+            if form_fields and get_uses_form:
                 parameters += _form_fields_to_query_params(form_fields)
 
         operation = {
