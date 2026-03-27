@@ -99,7 +99,14 @@ def _get_uses_form(view_class):
 
 
 def _get_pagination_query_params(view_class):
-    """Return OpenAPI query parameter dicts for pagination if the view paginates."""
+    """Return OpenAPI query parameter dicts for pagination if the view paginates.
+
+    Only list-style endpoints (those using ListModelMixin) actually paginate;
+    detail endpoints inherit the paginate attribute but never call paginate_queryset.
+    """
+    from resticus.mixins import ListModelMixin
+    if not issubclass(view_class, ListModelMixin):
+        return []
     if not getattr(view_class, 'paginate', False):
         return []
     params = [{
