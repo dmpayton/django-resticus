@@ -224,25 +224,25 @@ class SchemaGenerator:
         for method in http_methods:
             if hasattr(view_class, method):
                 operations[method] = self._build_operation(
-                    view_class, method, path_params, form_fields, has_write, tags
+                    view_class, method, path_params, form_fields, has_write, tags,
+                    description=description,
                 )
 
         if not operations:
             return None
 
         item = {}
-        if description:
-            item['description'] = description
         item.update(operations)
         return item
 
     def _build_operation(self, view_class, method, path_params,
-                         form_fields=None, has_write=False, tags=None):
+                         form_fields=None, has_write=False, tags=None,
+                         description=None):
         form_fields = form_fields or []
         method_func = getattr(view_class, method, None)
 
-        # Only use the docstring if this class defines the method itself,
-        # not if it's inherited from a base class.
+        # Only use the method docstring as summary if the method is defined
+        # directly on this class, not inherited from a base class.
         if method in view_class.__dict__:
             summary = (getattr(method_func, '__doc__', None) or '').strip()
         else:
@@ -273,6 +273,9 @@ class SchemaGenerator:
 
         if tags:
             operation['tags'] = tags
+
+        if description:
+            operation['description'] = description
 
         if summary:
             operation['summary'] = summary
