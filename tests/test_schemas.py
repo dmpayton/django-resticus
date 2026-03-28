@@ -543,7 +543,9 @@ class ParentSerializer(Serializer):
 class TestModelFieldToSchema(TestCase):
     def test_char_field_is_string(self):
         field = Book._meta.get_field('title')
-        assert _model_field_to_schema(field) == {'type': 'string'}
+        schema = _model_field_to_schema(field)
+        assert schema['type'] == 'string'
+        assert schema['maxLength'] == 255
 
     def test_decimal_field_is_number(self):
         field = Book._meta.get_field('price')
@@ -558,7 +560,8 @@ class TestModelFieldToSchema(TestCase):
 class TestSerializerToSchema(TestCase):
     def test_string_field_resolved_from_model(self):
         props = _serializer_to_schema(BookSerializer, model=Book)
-        assert props['title'] == {'type': 'string'}
+        assert props['title']['type'] == 'string'
+        assert props['title']['maxLength'] == 255
 
     def test_decimal_field_resolved(self):
         props = _serializer_to_schema(BookSerializer, model=Book)
@@ -721,6 +724,72 @@ class TestCreateDeleteResponseCodes(TestCase):
 # ---------------------------------------------------------------------------
 
 from django.db import models as django_models
+
+
+class TestModelFieldConstraints(TestCase):
+    def test_char_field_emits_max_length(self):
+        field = django_models.CharField(max_length=50)
+        schema = _model_field_to_schema(field)
+        assert schema['maxLength'] == 50
+
+    def test_text_field_with_max_length_emits_it(self):
+        field = django_models.TextField(max_length=500)
+        schema = _model_field_to_schema(field)
+        assert schema['maxLength'] == 500
+
+    def test_text_field_without_max_length_omits_it(self):
+        field = django_models.TextField()
+        schema = _model_field_to_schema(field)
+        assert 'maxLength' not in schema
+
+    def test_integer_field_has_no_max_length(self):
+        field = django_models.IntegerField()
+        schema = _model_field_to_schema(field)
+        assert 'maxLength' not in schema
+
+    def test_help_text_added_as_description(self):
+        field = django_models.CharField(max_length=100, help_text='The field label.')
+        schema = _model_field_to_schema(field)
+        assert schema['description'] == 'The field label.'
+
+    def test_empty_help_text_omits_description(self):
+        field = django_models.CharField(max_length=100)
+        schema = _model_field_to_schema(field)
+        assert 'description' not in schema
+
+
+class TestComponentSchemaRequired(TestCase):
+    def test_component_schema_has_required_list(self):
+        generator = SchemaGenerator(urlconf=FakeSerializerURLConf)
+        schema = generator.get_schema()
+        book_schema = schema['components']['schemas']['BookSerializer']
+        assert 'required' in book_schema
+        assert 'title' in book_schema['required']
+        assert 'price' in book_schema['required']
+
+
+class TestErrorResponseSchema(TestCase):
+    def test_error_response_registered_in_components(self):
+        schema = SchemaGenerator(urlconf=FakeURLConf).get_schema()
+        assert 'ErrorResponse' in schema['components']['schemas']
+
+    def test_error_response_schema_structure(self):
+        schema = SchemaGenerator(urlconf=FakeURLConf).get_schema()
+        error_schema = schema['components']['schemas']['ErrorResponse']
+        assert error_schema['type'] == 'object'
+        assert 'errors' in error_schema['properties']
+
+    def test_404_response_references_error_schema(self):
+        schema = SchemaGenerator(urlconf=FakeURLConf).get_schema()
+        responses = schema['paths']['/items/{pk}/']['get']['responses']
+        assert responses['404']['content']['application/json']['schema']['$ref'] == \
+            '#/components/schemas/ErrorResponse'
+
+    def test_401_response_references_error_schema(self):
+        schema = SchemaGenerator(urlconf=FakeAuthURLConf).get_schema()
+        responses = schema['paths']['/secure/']['get']['responses']
+        assert responses['401']['content']['application/json']['schema']['$ref'] == \
+            '#/components/schemas/ErrorResponse'
 
 
 class TestModelFieldChoices(TestCase):

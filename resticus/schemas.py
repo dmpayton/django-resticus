@@ -125,6 +125,16 @@ def _model_field_to_schema(model_field):
         if values:
             schema['enum'] = [str(v) for v in values]
 
+    # maxLength for bounded string fields (CharField, SlugField, etc.)
+    max_length = getattr(model_field, 'max_length', None)
+    if max_length and schema.get('type') == 'string':
+        schema['maxLength'] = max_length
+
+    # description from help_text
+    help_text = str(getattr(model_field, 'help_text', '') or '')
+    if help_text:
+        schema['description'] = help_text
+
     # Nullability — OpenAPI 3.1 allows type arrays
     if getattr(model_field, 'null', False):
         base_type = schema.get('type')
@@ -180,6 +190,25 @@ def _serializer_to_schema(serializer_class, model=None):
                 properties[key] = {}
 
     return properties
+
+
+_ERROR_RESPONSE_SCHEMA = {
+    'type': 'object',
+    'required': ['errors'],
+    'properties': {
+        'errors': {
+            'type': 'object',
+            'additionalProperties': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'properties': {'message': {'type': 'string'}},
+                    'required': ['message'],
+                },
+            },
+        },
+    },
+}
 
 
 def _get_form_fields(view_class):
@@ -325,11 +354,13 @@ class SchemaGenerator:
 
     def get_schema(self, request=None):
         self._security_schemes = self._get_security_schemes()
+        self._component_schemas['ErrorResponse'] = _ERROR_RESPONSE_SCHEMA
         paths = self._collect_paths()
 
-        components = {'securitySchemes': self._security_schemes}
-        if self._component_schemas:
-            components['schemas'] = self._component_schemas
+        components = {
+            'securitySchemes': self._security_schemes,
+            'schemas': self._component_schemas,
+        }
 
         schema = {
             'openapi': '3.1.0',
@@ -444,6 +475,7 @@ class SchemaGenerator:
             if properties:
                 self._component_schemas[name] = {
                     'type': 'object',
+                    'required': list(properties.keys()),
                     'properties': properties,
                 }
         return name
@@ -506,19 +538,21 @@ class SchemaGenerator:
                     ok_response['content'] = content
             responses = {'200': ok_response}
 
+        error_content = {'application/json': {'schema': {'$ref': '#/components/schemas/ErrorResponse'}}}
+
         # 400 for endpoints that validate form/query input
         if (method in ('post', 'put', 'patch') and form_fields) or \
            (method == 'get' and form_fields and get_uses_form):
-            responses['400'] = {'description': 'Bad request'}
+            responses['400'] = {'description': 'Bad request', 'content': error_content}
 
         # 401/403 for auth-required endpoints
         if method_login_required:
-            responses['401'] = {'description': 'Authentication required'}
-            responses['403'] = {'description': 'Permission denied'}
+            responses['401'] = {'description': 'Authentication required', 'content': error_content}
+            responses['403'] = {'description': 'Permission denied', 'content': error_content}
 
         # 404 for detail endpoints
         if issubclass(view_class, DetailModelMixin):
-            responses['404'] = {'description': 'Not found'}
+            responses['404'] = {'description': 'Not found', 'content': error_content}
 
         return responses
 
