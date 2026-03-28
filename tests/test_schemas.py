@@ -616,10 +616,15 @@ class TestResponseSchema(TestCase):
         props = response['content']['application/json']['schema']['properties']
         assert props['data']['type'] == 'array'
 
-    def test_list_response_items_have_fields(self):
+    def test_list_response_items_use_ref(self):
         response = self.schema['paths']['/books/']['get']['responses']['200']
         props = response['content']['application/json']['schema']['properties']
-        item_props = props['data']['items']['properties']
+        assert '$ref' in props['data']['items']
+        assert props['data']['items']['$ref'] == '#/components/schemas/BookSerializer'
+
+    def test_list_response_component_schema_has_fields(self):
+        assert 'BookSerializer' in self.schema['components']['schemas']
+        item_props = self.schema['components']['schemas']['BookSerializer']['properties']
         assert 'title' in item_props
         assert 'price' in item_props
 
@@ -632,20 +637,128 @@ class TestResponseSchema(TestCase):
         assert 'has_next_page' in props
         assert 'has_previous_page' in props
 
-    def test_detail_response_has_data_object(self):
+    def test_detail_response_data_uses_ref(self):
         response = self.schema['paths']['/books/{isbn}/']['get']['responses']['200']
         props = response['content']['application/json']['schema']['properties']
-        assert props['data']['type'] == 'object'
-
-    def test_detail_response_data_has_item_fields(self):
-        response = self.schema['paths']['/books/{isbn}/']['get']['responses']['200']
-        props = response['content']['application/json']['schema']['properties']
-        item_props = props['data']['properties']
-        assert 'title' in item_props
-        assert 'price' in item_props
+        assert '$ref' in props['data']
+        assert props['data']['$ref'] == '#/components/schemas/BookSerializer'
 
     def test_view_without_serializer_has_no_response_content(self):
         # DocumentedView has no serializer_class
         schema = SchemaGenerator(urlconf=FakeURLConf).get_schema()
         response = schema['paths']['/items/']['get']['responses']['200']
         assert 'content' not in response
+
+
+# ---------------------------------------------------------------------------
+# Token auth in securitySchemes
+# ---------------------------------------------------------------------------
+
+class TestTokenAuthScheme(TestCase):
+    @override_settings(RESTICUS={
+        'DEFAULT_AUTHENTICATION_CLASSES': ['resticus.auth.TokenAuth'],
+    })
+    def test_token_auth_added_when_configured(self):
+        generator = SchemaGenerator(urlconf=FakeURLConf)
+        schema = generator.get_schema()
+        assert 'tokenAuth' in schema['components']['securitySchemes']
+        token_scheme = schema['components']['securitySchemes']['tokenAuth']
+        assert token_scheme['type'] == 'apiKey'
+        assert token_scheme['in'] == 'header'
+        assert token_scheme['name'] == 'Authorization'
+
+    def test_session_auth_always_present(self):
+        schema = SchemaGenerator(urlconf=FakeURLConf).get_schema()
+        assert 'sessionAuth' in schema['components']['securitySchemes']
+
+
+# ---------------------------------------------------------------------------
+# 201 / 204 response codes
+# ---------------------------------------------------------------------------
+
+from tests.testapp.forms import AuthorForm
+
+
+class CreateView(generics.CreateEndpoint):
+    model = Author
+    form_class = AuthorForm
+
+
+class DeleteView(generics.DeleteEndpoint):
+    model = Author
+
+
+class CreateDeleteURLConf:
+    urlpatterns = [
+        path('authors/', CreateView.as_view(), name='author-create'),
+        path('authors/<int:pk>/', DeleteView.as_view(), name='author-delete'),
+    ]
+
+
+class TestCreateDeleteResponseCodes(TestCase):
+    def setUp(self):
+        self.schema = SchemaGenerator(urlconf=CreateDeleteURLConf).get_schema()
+
+    def test_create_endpoint_returns_201(self):
+        responses = self.schema['paths']['/authors/']['post']['responses']
+        assert '201' in responses
+
+    def test_create_endpoint_no_200(self):
+        responses = self.schema['paths']['/authors/']['post']['responses']
+        assert '200' not in responses
+
+    def test_delete_endpoint_returns_204(self):
+        responses = self.schema['paths']['/authors/{pk}/']['delete']['responses']
+        assert '204' in responses
+
+    def test_delete_endpoint_no_200(self):
+        responses = self.schema['paths']['/authors/{pk}/']['delete']['responses']
+        assert '200' not in responses
+
+
+# ---------------------------------------------------------------------------
+# Model field choices → enum, nullable type arrays
+# ---------------------------------------------------------------------------
+
+from django.db import models as django_models
+
+
+class TestModelFieldChoices(TestCase):
+    def test_choices_added_as_enum(self):
+        field = django_models.CharField(
+            max_length=10,
+            choices=[('a', 'Alpha'), ('b', 'Beta')],
+        )
+        schema = _model_field_to_schema(field)
+        assert schema['enum'] == ['a', 'b']
+
+    def test_grouped_choices_flattened(self):
+        field = django_models.IntegerField(
+            choices=[('Group', [(1, 'One'), (2, 'Two')]), (3, 'Three')],
+        )
+        schema = _model_field_to_schema(field)
+        assert set(schema['enum']) == {'1', '2', '3'}
+
+    def test_field_without_choices_has_no_enum(self):
+        field = django_models.CharField(max_length=100)
+        schema = _model_field_to_schema(field)
+        assert 'enum' not in schema
+
+
+class TestModelFieldNullable(TestCase):
+    def test_nullable_field_has_type_array(self):
+        field = django_models.CharField(max_length=100)
+        field.null = True
+        schema = _model_field_to_schema(field)
+        assert schema['type'] == ['string', 'null']
+
+    def test_non_nullable_field_has_simple_type(self):
+        field = django_models.CharField(max_length=100)
+        schema = _model_field_to_schema(field)
+        assert schema['type'] == 'string'
+
+    def test_nullable_integer_field(self):
+        field = django_models.IntegerField()
+        field.null = True
+        schema = _model_field_to_schema(field)
+        assert schema['type'] == ['integer', 'null']
