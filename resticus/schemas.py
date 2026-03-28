@@ -111,6 +111,10 @@ def _model_field_to_schema(model_field):
         base = {'type': 'boolean'}
     elif isinstance(model_field, models.JSONField):
         return {}  # any type — nullable doesn't narrow this further
+    elif isinstance(model_field, models.EmailField):
+        base = {'type': 'string', 'format': 'email'}
+    elif isinstance(model_field, models.URLField):
+        base = {'type': 'string', 'format': 'uri'}
     elif isinstance(model_field, models.FileField):
         base = {'type': 'string'}
     else:
@@ -480,8 +484,35 @@ class SchemaGenerator:
                 }
         return name
 
+    def _build_item_content(self, view_class):
+        """Build response content for a single serialized item (create/update responses)."""
+        from resticus.serializers import Serializer
+
+        serializer_class = getattr(view_class, 'serializer_class', None)
+        if serializer_class is None:
+            return None
+        if not (inspect.isclass(serializer_class) and issubclass(serializer_class, Serializer)):
+            return None
+
+        model = getattr(view_class, 'model', None)
+        schema_name = self._register_component_schema(serializer_class, model)
+        if schema_name not in self._component_schemas:
+            return None
+
+        item_ref = {'$ref': f'#/components/schemas/{schema_name}'}
+        return {
+            'application/json': {
+                'schema': {'type': 'object', 'properties': {'data': item_ref}}
+            }
+        }
+
     def _build_response_content(self, view_class):
-        """Build the 200 response content schema for list/detail endpoints, or None."""
+        """Build the GET 200 response content schema, or None."""
+        # Custom content type (e.g. text/csv for streaming export endpoints)
+        response_content_type = getattr(view_class, 'response_content_type', None)
+        if response_content_type:
+            return {response_content_type: {'schema': {'type': 'string'}}}
+
         from resticus.serializers import Serializer
         from resticus.mixins import ListModelMixin, DetailModelMixin
 
@@ -528,14 +559,22 @@ class SchemaGenerator:
         # Base success response
         if method == 'delete' and issubclass(view_class, DeleteModelMixin):
             responses = {'204': {'description': 'No content'}}
-        elif method in ('post', 'put', 'patch') and issubclass(view_class, CreateModelMixin):
-            responses = {'201': {'description': 'Created'}}
+        elif method == 'post' and issubclass(view_class, CreateModelMixin):
+            created_response = {'description': 'Created'}
+            content = self._build_item_content(view_class)
+            if content:
+                created_response['content'] = content
+            responses = {'201': created_response}
         else:
             ok_response = {'description': 'OK'}
             if method == 'get':
                 content = self._build_response_content(view_class)
-                if content:
-                    ok_response['content'] = content
+            elif method in ('put', 'patch'):
+                content = self._build_item_content(view_class)
+            else:
+                content = None
+            if content:
+                ok_response['content'] = content
             responses = {'200': ok_response}
 
         error_content = {'application/json': {'schema': {'$ref': '#/components/schemas/ErrorResponse'}}}

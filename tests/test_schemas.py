@@ -726,6 +726,98 @@ class TestCreateDeleteResponseCodes(TestCase):
 from django.db import models as django_models
 
 
+class TestModelFieldFormats(TestCase):
+    def test_email_field_has_email_format(self):
+        field = django_models.EmailField()
+        schema = _model_field_to_schema(field)
+        assert schema['type'] == 'string'
+        assert schema['format'] == 'email'
+
+    def test_url_field_has_uri_format(self):
+        field = django_models.URLField()
+        schema = _model_field_to_schema(field)
+        assert schema['type'] == 'string'
+        assert schema['format'] == 'uri'
+
+    def test_uuid_field_has_uuid_format(self):
+        field = django_models.UUIDField()
+        schema = _model_field_to_schema(field)
+        assert schema['format'] == 'uuid'
+
+    def test_datetime_field_has_date_time_format(self):
+        field = django_models.DateTimeField()
+        schema = _model_field_to_schema(field)
+        assert schema['format'] == 'date-time'
+
+
+class CreateSerializerView(generics.CreateEndpoint):
+    model = Book
+    serializer_class = BookSerializer
+    form_class = AuthorForm
+
+
+class UpdateSerializerView(generics.UpdateEndpoint):
+    model = Book
+    serializer_class = BookSerializer
+
+
+class CsvStreamView(generics.ListEndpoint):
+    model = Book
+    serializer_class = BookSerializer
+    response_content_type = 'text/csv'
+
+    def get_queryset(self):
+        return []
+
+
+crud_urlconf_patterns = [
+    path('books/', CreateSerializerView.as_view(), name='book-create'),
+    path('books/<int:pk>/', UpdateSerializerView.as_view(), name='book-update'),
+    path('books/export/', CsvStreamView.as_view(), name='book-csv'),
+]
+
+
+class FakeCRUDURLConf:
+    urlpatterns = crud_urlconf_patterns
+
+
+class TestCreateUpdateResponseSchema(TestCase):
+    def setUp(self):
+        self.schema = SchemaGenerator(urlconf=FakeCRUDURLConf).get_schema()
+
+    def test_create_201_has_response_body(self):
+        responses = self.schema['paths']['/books/']['post']['responses']
+        assert '201' in responses
+        assert 'content' in responses['201']
+
+    def test_create_201_response_references_serializer(self):
+        responses = self.schema['paths']['/books/']['post']['responses']
+        ref = responses['201']['content']['application/json']['schema']['properties']['data']['$ref']
+        assert ref == '#/components/schemas/BookSerializer'
+
+    def test_update_200_has_response_body(self):
+        responses = self.schema['paths']['/books/{pk}/']['put']['responses']
+        assert 'content' in responses['200']
+
+    def test_update_200_response_references_serializer(self):
+        responses = self.schema['paths']['/books/{pk}/']['put']['responses']
+        ref = responses['200']['content']['application/json']['schema']['properties']['data']['$ref']
+        assert ref == '#/components/schemas/BookSerializer'
+
+
+class TestResponseContentType(TestCase):
+    def test_csv_endpoint_uses_text_csv_content_type(self):
+        schema = SchemaGenerator(urlconf=FakeCRUDURLConf).get_schema()
+        response = schema['paths']['/books/export/']['get']['responses']['200']
+        assert 'content' in response
+        assert 'text/csv' in response['content']
+
+    def test_csv_endpoint_schema_is_string(self):
+        schema = SchemaGenerator(urlconf=FakeCRUDURLConf).get_schema()
+        response = schema['paths']['/books/export/']['get']['responses']['200']
+        assert response['content']['text/csv']['schema']['type'] == 'string'
+
+
 class TestModelFieldConstraints(TestCase):
     def test_char_field_emits_max_length(self):
         field = django_models.CharField(max_length=50)
