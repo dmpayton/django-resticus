@@ -94,6 +94,33 @@ class TestSchemaGeneratorTraversal(TestCase):
         params = schema['paths']['/items/{pk}/']['get']['parameters']
         assert any(p['name'] == 'pk' and p['in'] == 'path' for p in params)
 
+    def test_int_path_converter_yields_integer_type(self):
+        # DetailView uses <int:pk> — should produce type: integer, not string
+        schema = self.generator.get_schema()
+        params = schema['paths']['/items/{pk}/']['get']['parameters']
+        pk_param = next(p for p in params if p['name'] == 'pk')
+        assert pk_param['schema']['type'] == 'integer'
+
+    def test_operation_id_present(self):
+        schema = self.generator.get_schema()
+        op = schema['paths']['/items/']['get']
+        assert 'operationId' in op
+
+    def test_operation_id_includes_url_name_and_method(self):
+        schema = self.generator.get_schema()
+        assert schema['paths']['/items/']['get']['operationId'] == 'item_list_get'
+        assert schema['paths']['/items/{pk}/']['get']['operationId'] == 'item_detail_get'
+
+    def test_responses_has_404_for_detail_endpoint(self):
+        schema = self.generator.get_schema()
+        responses = schema['paths']['/items/{pk}/']['get']['responses']
+        assert '404' in responses
+
+    def test_responses_no_404_for_list_endpoint(self):
+        schema = self.generator.get_schema()
+        responses = schema['paths']['/items/']['get']['responses']
+        assert '404' not in responses
+
 
 class FilteredView(generics.ListEndpoint):
     model = None
@@ -272,6 +299,45 @@ class TestAuthIntrospection(TestCase):
         get_op = self.schema['paths']['/mixed/']['get']
         assert 'security' in get_op
         assert {'sessionAuth': []} in get_op['security']
+
+    def test_login_required_adds_401_and_403_responses(self):
+        get_op = self.schema['paths']['/secure/']['get']
+        assert '401' in get_op['responses']
+        assert '403' in get_op['responses']
+
+    def test_unauthenticated_endpoint_has_no_401_or_403(self):
+        post_op = self.schema['paths']['/mixed/']['post']
+        assert '401' not in post_op['responses']
+        assert '403' not in post_op['responses']
+
+
+class DeprecatedView(Endpoint):
+    deprecated = True
+
+    def get(self, request):
+        return {}
+
+
+deprecated_urlconf_patterns = [
+    path('old/', DeprecatedView.as_view(), name='old-endpoint'),
+]
+
+
+class FakeDeprecatedURLConf:
+    urlpatterns = deprecated_urlconf_patterns
+
+
+class TestDeprecated(TestCase):
+    def setUp(self):
+        self.schema = SchemaGenerator(urlconf=FakeDeprecatedURLConf).get_schema()
+
+    def test_deprecated_flag_on_operation(self):
+        assert self.schema['paths']['/old/']['get']['deprecated'] is True
+
+    def test_non_deprecated_view_has_no_deprecated_key(self):
+        schema = SchemaGenerator(urlconf=FakeURLConf).get_schema()
+        op = schema['paths']['/items/']['get']
+        assert 'deprecated' not in op
 
 
 from django.test import RequestFactory

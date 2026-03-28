@@ -20,6 +20,15 @@ FORM_FIELD_TYPE_MAP = {
     django_forms.DateTimeField: {'type': 'string', 'format': 'date-time'},
 }
 
+# Maps Django URL path converter names to OpenAPI schema dicts.
+DJANGO_PATH_CONVERTER_MAP = {
+    'int': {'type': 'integer'},
+    'uuid': {'type': 'string', 'format': 'uuid'},
+    'slug': {'type': 'string'},
+    'str': {'type': 'string'},
+    'path': {'type': 'string'},
+}
+
 
 def _form_field_to_schema(field):
     """Map a Django form field instance to an OpenAPI schema dict."""
@@ -156,13 +165,23 @@ def _django_path_to_openapi(path_str):
     return re.sub(r'<(?:[^:>]+:)?([^>]+)>', r'{\1}', path_str)
 
 
-def _extract_path_params(openapi_path):
-    """Return list of OpenAPI parameter dicts for each {param} in the path."""
-    params = re.findall(r'\{(\w+)\}', openapi_path)
-    return [
-        {'name': p, 'in': 'path', 'required': True, 'schema': {'type': 'string'}}
-        for p in params
-    ]
+def _extract_path_params(raw_django_path):
+    """Return OpenAPI path parameter dicts parsed from a Django URL pattern.
+
+    Preserves type information from Django path converters:
+    <int:pk> → type: integer, <uuid:id> → type: string/format: uuid, etc.
+    """
+    params = []
+    for match in re.finditer(r'<(?:([^:>]+):)?([^>]+)>', raw_django_path):
+        converter, name = match.group(1), match.group(2)
+        schema = dict(DJANGO_PATH_CONVERTER_MAP.get(converter or 'str', {'type': 'string'}))
+        params.append({
+            'name': name,
+            'in': 'path',
+            'required': True,
+            'schema': schema,
+        })
+    return params
 
 
 def _derive_tags_from_path(openapi_path):
@@ -170,6 +189,36 @@ def _derive_tags_from_path(openapi_path):
     parts = openapi_path.strip('/').split('/')
     first = parts[0] if parts else ''
     return [first] if first else []
+
+
+def _make_operation_id(url_name, method):
+    """Build a unique operationId from the URL name and HTTP method."""
+    sanitized = re.sub(r'[^a-zA-Z0-9]+', '_', url_name or '').strip('_')
+    return f'{sanitized}_{method}'
+
+
+def _build_responses(method, view_class, method_login_required, form_fields, get_uses_form):
+    """Build the OpenAPI responses object for an operation."""
+    from resticus.mixins import DetailModelMixin
+
+    responses = {'200': {'description': 'OK'}}
+
+    # 400 for endpoints that validate form/query input
+    if (method in ('post', 'put', 'patch') and form_fields) or \
+       (method == 'get' and form_fields and get_uses_form):
+        responses['400'] = {'description': 'Bad request'}
+
+    # 401/403 for auth-required endpoints (resticus returns 401 with WWW-Authenticate
+    # header present, 403 otherwise — depends on the configured auth backends)
+    if method_login_required:
+        responses['401'] = {'description': 'Authentication required'}
+        responses['403'] = {'description': 'Permission denied'}
+
+    # 404 for detail endpoints
+    if issubclass(view_class, DetailModelMixin):
+        responses['404'] = {'description': 'Not found'}
+
+    return responses
 
 
 class SchemaGenerator:
@@ -249,13 +298,13 @@ class SchemaGenerator:
         if not openapi_path.startswith('/'):
             openapi_path = '/' + openapi_path
 
-        path_item = self._build_path_item(view_class, openapi_path)
+        path_item = self._build_path_item(view_class, raw_path, openapi_path, pattern.name)
         if path_item:
             paths[openapi_path] = path_item
 
-    def _build_path_item(self, view_class, openapi_path):
+    def _build_path_item(self, view_class, raw_path, openapi_path, url_name=None):
         """Build the OpenAPI path item object for a view class."""
-        path_params = _extract_path_params(openapi_path)
+        path_params = _extract_path_params(raw_path)
         description = (view_class.__doc__ or '').strip()
 
         form_fields = _get_form_fields(view_class)
@@ -269,6 +318,7 @@ class SchemaGenerator:
                 operations[method] = self._build_operation(
                     view_class, method, path_params, form_fields, get_uses_form, tags,
                     description=description,
+                    url_name=url_name,
                 )
 
         if not operations:
@@ -280,7 +330,7 @@ class SchemaGenerator:
 
     def _build_operation(self, view_class, method, path_params,
                          form_fields=None, get_uses_form=False, tags=None,
-                         description=None):
+                         description=None, url_name=None):
         form_fields = form_fields or []
         method_func = getattr(view_class, method, None)
 
@@ -305,8 +355,9 @@ class SchemaGenerator:
                 parameters += _form_fields_to_query_params(form_fields)
 
         operation = {
+            'operationId': _make_operation_id(url_name, method),
             'parameters': parameters,
-            'responses': {'200': {'description': 'OK'}},
+            'responses': _build_responses(method, view_class, method_login_required, form_fields, get_uses_form),
         }
 
         if method in ('post', 'put', 'patch') and form_fields:
@@ -323,5 +374,8 @@ class SchemaGenerator:
 
         if summary:
             operation['summary'] = summary
+
+        if getattr(view_class, 'deprecated', False):
+            operation['deprecated'] = True
 
         return operation
