@@ -4,8 +4,10 @@ from django.urls import path
 from resticus.views import Endpoint
 from resticus.settings import api_settings
 from resticus import generics
-from resticus.schemas import SchemaGenerator
+from resticus.schemas import SchemaGenerator, _serializer_to_schema, _model_field_to_schema
+from resticus.serializers import Serializer
 from tests.testapp.filters import BookFilter
+from tests.testapp.models import Book, Author
 
 
 class TestDocumentedAttribute(TestCase):
@@ -510,3 +512,140 @@ class TestTags(TestCase):
         # Root path '/' has no meaningful first segment — tags key must be absent
         op = list(schema['paths'].values())[0]['get']
         assert 'tags' not in op
+
+
+# ---------------------------------------------------------------------------
+# Serializer introspection
+# ---------------------------------------------------------------------------
+
+class BookSerializer(Serializer):
+    fields = [
+        'id',
+        'title',
+        'isbn',
+        'price',
+        'author',  # ForeignKey → int (Author PK is AutoField)
+        ('display', lambda b: str(b)),
+    ]
+
+
+class NestedSerializer(Serializer):
+    fields = ['name']
+
+
+class ParentSerializer(Serializer):
+    fields = [
+        'id',
+        ('nested', NestedSerializer),
+    ]
+
+
+class TestModelFieldToSchema(TestCase):
+    def test_char_field_is_string(self):
+        field = Book._meta.get_field('title')
+        assert _model_field_to_schema(field) == {'type': 'string'}
+
+    def test_decimal_field_is_number(self):
+        field = Book._meta.get_field('price')
+        assert _model_field_to_schema(field) == {'type': 'number'}
+
+    def test_foreign_key_returns_pk_type(self):
+        field = Book._meta.get_field('author')
+        # Author PK is an AutoField → integer
+        assert _model_field_to_schema(field) == {'type': 'integer'}
+
+
+class TestSerializerToSchema(TestCase):
+    def test_string_field_resolved_from_model(self):
+        props = _serializer_to_schema(BookSerializer, model=Book)
+        assert props['title'] == {'type': 'string'}
+
+    def test_decimal_field_resolved(self):
+        props = _serializer_to_schema(BookSerializer, model=Book)
+        assert props['price'] == {'type': 'number'}
+
+    def test_fk_field_resolved_to_pk_type(self):
+        props = _serializer_to_schema(BookSerializer, model=Book)
+        assert props['author'] == {'type': 'integer'}
+
+    def test_callable_field_is_any_type(self):
+        props = _serializer_to_schema(BookSerializer, model=Book)
+        assert props['display'] == {}
+
+    def test_nested_serializer_becomes_object(self):
+        props = _serializer_to_schema(ParentSerializer, model=Author)
+        assert props['nested']['type'] == 'object'
+        assert 'name' in props['nested']['properties']
+
+    def test_no_model_string_field_is_any_type(self):
+        props = _serializer_to_schema(BookSerializer, model=None)
+        assert props['title'] == {}
+
+
+class BookListView(generics.ListEndpoint):
+    """List all books."""
+    model = Book
+    serializer_class = BookSerializer
+    paginate = True
+
+
+class BookDetailView(generics.DetailEndpoint):
+    """Retrieve a single book."""
+    model = Book
+    serializer_class = BookSerializer
+    lookup_field = 'isbn'
+
+
+serializer_urlconf_patterns = [
+    path('books/', BookListView.as_view(), name='book-list'),
+    path('books/<str:isbn>/', BookDetailView.as_view(), name='book-detail'),
+]
+
+
+class FakeSerializerURLConf:
+    urlpatterns = serializer_urlconf_patterns
+
+
+class TestResponseSchema(TestCase):
+    def setUp(self):
+        self.generator = SchemaGenerator(urlconf=FakeSerializerURLConf)
+        self.schema = self.generator.get_schema()
+
+    def test_list_response_has_data_array(self):
+        response = self.schema['paths']['/books/']['get']['responses']['200']
+        props = response['content']['application/json']['schema']['properties']
+        assert props['data']['type'] == 'array'
+
+    def test_list_response_items_have_fields(self):
+        response = self.schema['paths']['/books/']['get']['responses']['200']
+        props = response['content']['application/json']['schema']['properties']
+        item_props = props['data']['items']['properties']
+        assert 'title' in item_props
+        assert 'price' in item_props
+
+    def test_paginated_list_includes_pagination_fields(self):
+        response = self.schema['paths']['/books/']['get']['responses']['200']
+        props = response['content']['application/json']['schema']['properties']
+        assert 'page' in props
+        assert 'count' in props
+        assert 'pages' in props
+        assert 'has_next_page' in props
+        assert 'has_previous_page' in props
+
+    def test_detail_response_has_data_object(self):
+        response = self.schema['paths']['/books/{isbn}/']['get']['responses']['200']
+        props = response['content']['application/json']['schema']['properties']
+        assert props['data']['type'] == 'object'
+
+    def test_detail_response_data_has_item_fields(self):
+        response = self.schema['paths']['/books/{isbn}/']['get']['responses']['200']
+        props = response['content']['application/json']['schema']['properties']
+        item_props = props['data']['properties']
+        assert 'title' in item_props
+        assert 'price' in item_props
+
+    def test_view_without_serializer_has_no_response_content(self):
+        # DocumentedView has no serializer_class
+        schema = SchemaGenerator(urlconf=FakeURLConf).get_schema()
+        response = schema['paths']['/items/']['get']['responses']['200']
+        assert 'content' not in response

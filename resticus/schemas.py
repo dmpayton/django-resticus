@@ -1,3 +1,4 @@
+import inspect
 import re
 
 from django import forms as django_forms
@@ -45,6 +46,108 @@ def _form_field_to_schema(field):
             return dict(schema)  # copy to avoid mutation
 
     return {'type': 'string'}  # safe fallback
+
+
+def _model_field_to_schema(model_field):
+    """Map a Django model field instance to an OpenAPI schema dict."""
+    from django.db import models
+
+    # Check GIS fields before generic fallback (requires django.contrib.gis)
+    try:
+        from django.contrib.gis.db.models import GeometryField
+        if isinstance(model_field, GeometryField):
+            return {'type': 'object'}
+    except ImportError:
+        pass
+
+    # Relational fields
+    if isinstance(model_field, models.ForeignKey):
+        try:
+            return _model_field_to_schema(model_field.related_model._meta.pk)
+        except Exception:
+            return {'type': 'string'}
+    if isinstance(model_field, models.ManyToManyField):
+        try:
+            item_schema = _model_field_to_schema(model_field.related_model._meta.pk)
+        except Exception:
+            item_schema = {'type': 'string'}
+        return {'type': 'array', 'items': item_schema}
+
+    # DateTimeField before DateField — DateTimeField is a subclass of DateField
+    if isinstance(model_field, models.DateTimeField):
+        return {'type': 'string', 'format': 'date-time'}
+    if isinstance(model_field, models.DateField):
+        return {'type': 'string', 'format': 'date'}
+    if isinstance(model_field, models.TimeField):
+        return {'type': 'string', 'format': 'time'}
+    if isinstance(model_field, models.UUIDField):
+        return {'type': 'string', 'format': 'uuid'}
+    if isinstance(model_field, (
+        models.AutoField, models.SmallAutoField, models.BigAutoField,
+        models.IntegerField, models.SmallIntegerField, models.BigIntegerField,
+        models.PositiveIntegerField, models.PositiveSmallIntegerField,
+        models.PositiveBigIntegerField,
+    )):
+        return {'type': 'integer'}
+    if isinstance(model_field, (models.FloatField, models.DecimalField)):
+        return {'type': 'number'}
+    if isinstance(model_field, models.BooleanField):
+        return {'type': 'boolean'}
+    if isinstance(model_field, models.JSONField):
+        return {}
+    if isinstance(model_field, models.FileField):  # covers ImageField too
+        return {'type': 'string'}
+
+    return {'type': 'string'}  # CharField, TextField, SlugField, etc.
+
+
+def _serializer_to_schema(serializer_class, model=None):
+    """Convert a resticus Serializer class's declared fields to an OpenAPI properties dict.
+
+    Handles string fields (looked up against the model), tuple (key, Serializer) for
+    nested objects, and tuple (key, callable) for computed fields (emitted as any-type).
+    The fixup method and dynamically added fields cannot be statically introspected.
+    """
+    from resticus.serializers import Serializer
+
+    fields = getattr(serializer_class, 'fields', None)
+    include = getattr(serializer_class, 'include', None) or []
+    exclude = set(getattr(serializer_class, 'exclude', None) or [])
+
+    # Default: all local model fields
+    if fields is None:
+        if model is None:
+            return {}
+        fields = [f.name for f in model._meta.local_fields]
+
+    properties = {}
+    for field in list(fields) + list(include):
+        if isinstance(field, str):
+            if field in exclude:
+                continue
+            if model is not None:
+                try:
+                    model_field = model._meta.get_field(field)
+                    properties[field] = _model_field_to_schema(model_field)
+                    continue
+                except Exception:
+                    pass
+            properties[field] = {}  # unknown type (non-model attribute)
+
+        elif isinstance(field, tuple) and len(field) == 2:
+            key, value = field
+            if key in exclude:
+                continue
+            if inspect.isclass(value) and issubclass(value, Serializer):
+                nested = _serializer_to_schema(value)
+                properties[key] = (
+                    {'type': 'object', 'properties': nested} if nested
+                    else {'type': 'object'}
+                )
+            else:
+                properties[key] = {}  # callable or dict — type unknown
+
+    return properties
 
 
 def _get_form_fields(view_class):
@@ -197,11 +300,66 @@ def _make_operation_id(url_name, method):
     return f'{sanitized}_{method}'
 
 
+def _build_response_content(view_class):
+    """Build an OpenAPI response schema from the view's serializer_class, or None.
+
+    Returns a dict suitable for use as the 'content' value of a 200 response,
+    or None if the view has no serializer or the schema can't be inferred.
+
+    Only list and detail endpoints have known response envelopes; other endpoint
+    types (custom get, form-based, etc.) are skipped.
+    """
+    from resticus.serializers import Serializer
+    from resticus.mixins import ListModelMixin, DetailModelMixin
+
+    is_list = issubclass(view_class, ListModelMixin)
+    is_detail = issubclass(view_class, DetailModelMixin)
+    if not (is_list or is_detail):
+        return None
+
+    serializer_class = getattr(view_class, 'serializer_class', None)
+    if serializer_class is None:
+        return None
+    if not (inspect.isclass(serializer_class) and issubclass(serializer_class, Serializer)):
+        return None
+
+    model = getattr(view_class, 'model', None)
+    properties = _serializer_to_schema(serializer_class, model)
+    if not properties:
+        return None
+
+    item_schema = {'type': 'object', 'properties': properties}
+    response_properties = {}
+
+    if is_list:
+        response_properties['data'] = {'type': 'array', 'items': item_schema}
+        if getattr(view_class, 'paginate', False):
+            response_properties['page'] = {'type': 'integer'}
+            response_properties['count'] = {'type': 'integer'}
+            response_properties['pages'] = {'type': 'integer'}
+            response_properties['has_next_page'] = {'type': 'boolean'}
+            response_properties['has_previous_page'] = {'type': 'boolean'}
+    else:
+        response_properties['data'] = item_schema
+
+    return {
+        'application/json': {
+            'schema': {'type': 'object', 'properties': response_properties}
+        }
+    }
+
+
 def _build_responses(method, view_class, method_login_required, form_fields, get_uses_form):
     """Build the OpenAPI responses object for an operation."""
     from resticus.mixins import DetailModelMixin
 
-    responses = {'200': {'description': 'OK'}}
+    ok_response = {'description': 'OK'}
+    if method == 'get':
+        content = _build_response_content(view_class)
+        if content:
+            ok_response['content'] = content
+
+    responses = {'200': ok_response}
 
     # 400 for endpoints that validate form/query input
     if (method in ('post', 'put', 'patch') and form_fields) or \
