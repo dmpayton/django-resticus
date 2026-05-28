@@ -3,13 +3,13 @@ from django.test import TestCase
 
 from resticus.compat import json
 
-from .client import TestClient, debug
+from .client import ApiClient, debug
 from .testapp.models import Publisher, Author, Book
 
 
 class TestModelViews(TestCase):
     def setUp(self):
-        self.client = TestClient()
+        self.client = ApiClient()
         self.publisher = Publisher.objects.create(name='User Foo')
         self.author = Author.objects.create(name='User Foo')
         self.book = self.author.books.create(author=self.author, title='Book',

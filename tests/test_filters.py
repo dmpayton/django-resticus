@@ -3,15 +3,15 @@ from decimal import Decimal
 from django.test import TestCase
 from resticus.compat import json
 
-from .client import TestClient, debug
+from .client import ApiClient, debug
 from .testapp.models import Publisher, Author, Book
 
 
 class TestEndpoint(TestCase):
-    client_class = TestClient
+    client_class = ApiClient
 
     def setUp(self):
-        self.client = TestClient()
+        self.client = ApiClient()
         self.author = Author.objects.create(name='Author Foo')
         self.publisher = Publisher.objects.create(name='Publisher Foo')
         self.book1 = self.author.books.create(author=self.author, title='Book 1',
