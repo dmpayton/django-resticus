@@ -1,7 +1,8 @@
 import warnings
 from decimal import Decimal
+from types import SimpleNamespace
 from django.test import TestCase
-from resticus.serializers import serialize, flatten
+from resticus.serializers import serialize, serialize_object, flatten
 from .testapp.models import Publisher, Author, Book
 
 
@@ -185,3 +186,82 @@ class TestSerialization(TestCase):
             filter=lambda book: int(book.isbn.split('-')[-1]) < 5
         )
         assert len(s) == 5
+
+
+class TestSerializeObject(TestCase):
+    def setUp(self):
+        self.obj = SimpleNamespace(name='Alice', age=30, hidden='secret')
+
+    def test_basic_fields(self):
+        result = serialize_object(self.obj, fields=['name', 'age'])
+        self.assertEqual(result, {'name': 'Alice', 'age': 30})
+
+    def test_missing_attr_returns_none(self):
+        result = serialize_object(self.obj, fields=['name', 'missing'])
+        self.assertEqual(result, {'name': 'Alice', 'missing': None})
+
+    def test_exclude_string_field(self):
+        result = serialize_object(self.obj, fields=['name', 'age', 'hidden'], exclude=['hidden'])
+        self.assertEqual(result, {'name': 'Alice', 'age': 30})
+
+    def test_exclude_tuple_field(self):
+        result = serialize_object(
+            self.obj,
+            fields=['name', ('greeting', lambda o: 'hi')],
+            exclude=['greeting'],
+        )
+        self.assertEqual(result, {'name': 'Alice'})
+
+    def test_include_string_field(self):
+        result = serialize_object(self.obj, fields=['name'], include=['age'])
+        self.assertEqual(result, {'name': 'Alice', 'age': 30})
+
+    def test_include_tuple_callable(self):
+        result = serialize_object(
+            self.obj,
+            fields=['name'],
+            include=[('greeting', lambda o: f'Hello {o.name}')],
+        )
+        self.assertEqual(result, {'name': 'Alice', 'greeting': 'Hello Alice'})
+
+    def test_tuple_callable(self):
+        result = serialize_object(
+            self.obj,
+            fields=[('greeting', lambda o: f'Hello {o.name}')],
+        )
+        self.assertEqual(result, {'greeting': 'Hello Alice'})
+
+    def test_tuple_dict_recursive(self):
+        inner = SimpleNamespace(x=1, y=2)
+        obj = SimpleNamespace(child=inner)
+        result = serialize_object(obj, fields=[('child', {'fields': ['x']})])
+        self.assertEqual(result, {'child': {'x': 1}})
+
+    def test_fixup(self):
+        def fixup(obj, data):
+            data['extra'] = 'added'
+            return data
+
+        result = serialize_object(self.obj, fields=['name'], fixup=fixup)
+        self.assertEqual(result, {'name': 'Alice', 'extra': 'added'})
+
+    def test_empty_fields(self):
+        result = serialize_object(self.obj, fields=[])
+        self.assertEqual(result, {})
+
+
+class TestSerializeObjectDispatch(TestCase):
+    def test_plain_object_with_fields_routes_to_serialize_object(self):
+        obj = SimpleNamespace(x=1, y=2)
+        result = serialize(obj, fields=['x', 'y'])
+        self.assertEqual(result, {'x': 1, 'y': 2})
+
+    def test_plain_object_without_fields_passes_through(self):
+        obj = SimpleNamespace(x=1)
+        result = serialize(obj)
+        self.assertEqual(result, obj)
+
+    def test_list_of_plain_objects(self):
+        objs = [SimpleNamespace(n=i) for i in range(3)]
+        result = serialize(objs, fields=['n'])
+        self.assertEqual(result, [{'n': 0}, {'n': 1}, {'n': 2}])
