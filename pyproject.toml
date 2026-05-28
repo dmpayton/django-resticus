@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "django-resticus"
+version = "0.0.10"
+description = "A RESTful framework for Django"
+license = { text = "MIT" }
+authors = [{ name = "Derek Payton", email = "derek.payton@gmail.com" }]
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: Django",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "Django>=4.2",
+    "django-filter>=2.1.0",
+    "pyyaml",
+]
+
+[project.urls]
+Homepage = "https://github.com/dmpayton/django-resticus"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-django",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["resticus"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.settings"
+django_find_project = false

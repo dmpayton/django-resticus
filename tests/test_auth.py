@@ -2,12 +2,12 @@ import base64
 from django.test import TestCase
 from resticus.auth import TokenAuth
 from resticus.compat import json, get_user_model
-from .client import TestClient, debug
+from .client import ApiClient, debug
 from .testapp.models import Publisher, Author, Book
 
 
 class TestAuth(TestCase):
-    client_class = TestClient
+    client_class = ApiClient
 
     def setUp(self):
         self.user = get_user_model().objects.create_user(

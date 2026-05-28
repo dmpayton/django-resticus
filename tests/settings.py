@@ -52,6 +52,19 @@ MIDDLEWARE = (
 
 ROOT_URLCONF = 'tests.testapp.urls'
 
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.request',
+            ],
+        },
+    },
+]
+
 
 # Database
 # https://docs.djangoproject.com/en/1.8/ref/settings/#databases

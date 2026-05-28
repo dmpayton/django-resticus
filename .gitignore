@@ -5,3 +5,4 @@
 /*.egg-info
 /testproject/.coverage
 /testproject/htmlcov
+.worktrees

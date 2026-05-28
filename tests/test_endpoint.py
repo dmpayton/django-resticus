@@ -1,7 +1,7 @@
 import base64
 from django.test import TestCase
 from resticus.compat import json
-from .client import TestClient, debug
+from .client import ApiClient, debug
 from .testapp.models import Publisher, Author, Book
 
 try:
@@ -11,7 +11,7 @@ except ImportError:
 
 
 class TestEndpoint(TestCase):
-    client_class = TestClient
+    client_class = ApiClient
 
     def setUp(self):
         self.author = Author.objects.create(name='User Foo')

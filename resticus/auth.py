@@ -29,8 +29,10 @@ def get_authorization_header(request):
 
 
 class CSRFCheck(CsrfViewMiddleware):
+    def __init__(self):
+        super().__init__(lambda request: None)
+
     def _reject(self, request, reason):
-        # Return the failure reason instead of an HttpResponse
         return reason
 
 
@@ -56,7 +58,9 @@ class SessionAuth(BaseAuth):
         return user
 
     def enforce_csrf(self, request):
-        reason = CSRFCheck().process_view(request, None, (), {})
+        check = CSRFCheck()
+        check.process_request(request)
+        reason = check.process_view(request, None, (), {})
         if reason:
             raise exceptions.Forbidden(_("CSRF Failed: {0}").format(reason))
 

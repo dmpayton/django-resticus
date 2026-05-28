@@ -95,6 +95,9 @@ class GenericEndpoint(Endpoint):
             except (KeyError, ValueError):
                 page_size = self.page_size
 
+            if not queryset.ordered:
+                queryset = queryset.order_by('pk')
+
             self.paginator = paginator.Paginator(
                 object_list=queryset, per_page=page_size, allow_empty_first_page=True
             )

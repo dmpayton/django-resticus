@@ -1,10 +1,9 @@
-import yaml
-
 from django.conf import settings
 from django.contrib import auth
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.http import HttpResponse, StreamingHttpResponse, Http404
+from django.http import HttpResponse, JsonResponse, StreamingHttpResponse, Http404
+from django.template.response import TemplateResponse
 
 from django.utils.decorators import method_decorator
 from django.utils.translation import gettext as _
@@ -16,11 +15,10 @@ from .auth import SessionAuth, TokenAuth
 from .compat import get_user_model
 from .parsers import parse_content_type
 from .permissions import AllowAny
-from .schemas import SchemaGenerator
 from .serializers import serialize
 from .settings import api_settings
 
-__all__ = ["Endpoint", "SessionAuthEndpoint", "TokenAuthEndpoint"]
+__all__ = ["Endpoint", "SessionAuthEndpoint", "TokenAuthEndpoint", "OpenAPISchemaView", "DocsView"]
 
 
 class Endpoint(View):
@@ -60,6 +58,8 @@ class Endpoint(View):
 
     authentication_classes = api_settings.DEFAULT_AUTHENTICATION_CLASSES
     login_required = api_settings.LOGIN_REQUIRED
+    documented = api_settings.DOCUMENTED
+    tags = []
     permission_classes = api_settings.DEFAULT_PERMISSION_CLASSES
     data_parsers = api_settings.DATA_PARSERS
 
@@ -317,23 +317,59 @@ class TokenAuthEndpoint(Endpoint):
         return token
 
 
-def get_schema_view(title=None, prefix=None, urlconf=None):
-    """
-    Returns a Swagger/OpenAPI schema
-    """
+class DocsView(Endpoint):
+    """Serves an API documentation UI pointing at the OpenAPI schema."""
+    documented = False
+    permission_classes = [AllowAny]
+    login_required = False
 
-    class SchemaView(Endpoint):
-        exclude_from_schema = True
-        permission_classes = [AllowAny]
+    VALID_UIS = ('scalar', 'swagger', 'redoc', 'elements')
 
-        def get(self, request):
-            generator = SchemaGenerator(title=title, prefix=prefix, urlconf=urlconf)
-            schema = generator.get_schema(request=request)
-            schema = yaml.dump(schema, allow_unicode=True)
+    ui = api_settings.DOCS_UI
+    schema_url = None
+    title = 'API Documentation'
 
-            if not schema:
-                raise exceptions.ValidationError("Schema could not be generated.")
+    def setup(self, request, *args, **kwargs):
+        super().setup(request, *args, **kwargs)
+        if self.ui not in self.VALID_UIS:
+            raise ValueError(
+                f'Unknown API docs UI: {self.ui!r}. '
+                f'Available: {", ".join(self.VALID_UIS)}'
+            )
 
-            return HttpResponse(schema)
+    def get(self, request):
+        template_name = f'resticus/docs/{self.ui}.html'
+        response = TemplateResponse(request, template_name, {
+            'schema_url': self.schema_url,
+            'title': self.title,
+        })
+        response.render()
+        return response
 
-    return SchemaView.as_view()
+
+class OpenAPISchemaView(Endpoint):
+    """Serves an OpenAPI 3.1 schema as JSON."""
+    documented = False
+    permission_classes = [AllowAny]
+    login_required = False
+
+    title = None
+    description = None
+    version = None
+    urlconf = None
+
+    def get(self, request):
+        from resticus.schemas import SchemaGenerator
+
+        # Derive prefix from request path: /api/2.0/openapi.json → /api/2.0/
+        prefix = request.path.rsplit('/', 1)[0] + '/'
+
+        generator = SchemaGenerator(
+            title=self.title,
+            description=self.description,
+            version=self.version,
+            prefix=prefix,
+            urlconf=self.urlconf,
+        )
+        schema = generator.get_schema(request=request)
+        return JsonResponse(schema)

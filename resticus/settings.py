@@ -11,6 +11,8 @@ DEFAULTS = {
         "resticus.auth.BasicHttpAuth",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("resticus.permissions.AllowAny",),
+    "DOCUMENTED": True,
+    "DOCS_UI": "scalar",
     "ERROR_HANDLER": None,
     "JSON_DECODER": "resticus.encoders.JSONDecoder",
     "JSON_ENCODER": "resticus.encoders.JSONEncoder",

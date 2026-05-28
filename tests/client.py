@@ -11,7 +11,7 @@ def debug(fn):
     return override_settings(DEBUG=True)(fn)
 
 
-class TestClient(Client):
+class ApiClient(Client):
     @staticmethod
     def process(response):
         if isinstance(response, StreamingHttpResponse):
@@ -34,7 +34,7 @@ class TestClient(Client):
 
     def get(self, url_name, data={}, follow=False, extra={}, *args, **kwargs):
         return self.process(
-            super(TestClient, self).get(
+            super(ApiClient, self).get(
                 reverse(url_name, args=args, kwargs=kwargs),
                 data=data,
                 follow=follow,
@@ -43,7 +43,7 @@ class TestClient(Client):
     def post(self, url_name, data={}, content_type=MULTIPART_CONTENT,
             follow=False, extra={}, *args, **kwargs):
         return self.process(
-            super(TestClient, self).post(
+            super(ApiClient, self).post(
                 reverse(url_name, args=args, kwargs=kwargs),
                 content_type=content_type,
                 data=data,
@@ -53,13 +53,13 @@ class TestClient(Client):
     def put(self, url_name, data={}, content_type=MULTIPART_CONTENT,
             follow=False, extra={}, *args, **kwargs):
         return self.process(
-            super(TestClient, self).put(
+            super(ApiClient, self).put(
                 reverse(url_name, args=args, kwargs=kwargs),
                 content_type=content_type, data=data, follow=follow, **extra))
 
     def delete(self, url_name, data={}, content_type=MULTIPART_CONTENT,
             follow=False, extra={}, *args, **kwargs):
         return self.process(
-            super(TestClient, self).delete(
+            super(ApiClient, self).delete(
                 reverse(url_name, args=args, kwargs=kwargs),
                 content_type=content_type, data=data, follow=follow, **extra))
