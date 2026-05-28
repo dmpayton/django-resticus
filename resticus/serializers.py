@@ -7,7 +7,63 @@ from django.core.exceptions import FieldDoesNotExist, ObjectDoesNotExist
 from django.db import models
 from django.utils.functional import cached_property
 
-__all__ = ["serialize", "flatten"]
+__all__ = ["serialize", "serialize_object", "flatten"]
+
+
+def _resolve_tuple_field(instance, key, value):
+    """Resolve a (key, value) tuple field descriptor against an instance.
+
+    Handles three forms:
+      (key, SerializerSubclass)  — nested serialization via that class
+      (key, callable)            — calls callable(instance)
+      (key, dict)                — recursive serialize() with dict kwargs
+    """
+    if callable(value):
+        if inspect.isclass(value) and issubclass(value, Serializer):
+            return value(getattr(instance, key, None)).serialize()
+        return value(instance)
+    elif isinstance(value, dict):
+        try:
+            return serialize(getattr(instance, key, None), **value)
+        except ObjectDoesNotExist:
+            return None
+
+
+def serialize_object(
+    instance, fields=None, include=None, exclude=None, fixup=None, request=None
+):
+    """Serialize any Python object with attribute access.
+
+    Works on SimpleNamespace, dataclasses, namedtuples, or any object
+    whose fields are reachable via getattr. String fields are read with
+    getattr(instance, name, None); tuple fields are handled by
+    _resolve_tuple_field.
+
+    For Django model instances prefer serialize_model, which additionally
+    handles _meta field resolution, FileField, GEOSGeometry, and Manager.
+    """
+    fields = list(fields or [])
+
+    if exclude is not None:
+        fields = [f for f in fields if (f if isinstance(f, str) else f[0]) not in exclude]
+
+    if include is not None:
+        for attr in include:
+            if isinstance(attr, (tuple, str)):
+                fields.append(attr)
+
+    data = {}
+    for field in fields:
+        if isinstance(field, str):
+            data[field] = getattr(instance, field, None)
+        elif isinstance(field, tuple):
+            key, value = field
+            data[key] = _resolve_tuple_field(instance, key, value)
+
+    if fixup:
+        data = fixup(instance, data)
+
+    return data
 
 
 def serialize_model(
@@ -27,11 +83,11 @@ def serialize_model(
         fields = list(fields)
 
     if exclude is not None:
-        fields = [f for f in fields if f not in exclude]
+        fields = [f for f in fields if (f if isinstance(f, str) else f[0]) not in exclude]
 
     if include is not None:
         for attr in include:
-            if isinstance(attr, tuple) or (isinstance(attr, str)):
+            if isinstance(attr, (tuple, str)):
                 fields.append(attr)
 
     data = {}
@@ -50,7 +106,6 @@ def serialize_model(
                     value = request.build_absolute_uri(value)
                 data[field] = value
             elif isinstance(value, GEOSGeometry):
-                # TODO: How to tap into this and get the pre-JSON data structure?
                 data[field] = json.loads(value.geojson)
             elif isinstance(value, models.Manager):
                 data[field] = [item.pk for item in value.all()]
@@ -58,16 +113,7 @@ def serialize_model(
                 data[field] = value
         elif isinstance(field, tuple):
             key, value = field
-            if callable(value):
-                if inspect.isclass(value) and issubclass(value, Serializer):
-                    data[key] = value(getattr(instance, key)).serialize()
-                else:
-                    data[key] = value(instance)
-            elif isinstance(value, dict):
-                try:
-                    data[key] = serialize(getattr(instance, key), **value)
-                except ObjectDoesNotExist:
-                    data[key] = None
+            data[key] = _resolve_tuple_field(instance, key, value)
 
     if fixup:
         data = fixup(instance, data)
@@ -152,6 +198,16 @@ def serialize(
 
     elif isinstance(src, models.Model):
         return serialize_model(
+            src,
+            fields=fields,
+            include=include,
+            exclude=exclude,
+            fixup=fixup,
+            request=request,
+        )
+
+    elif fields is not None and hasattr(src, '__dict__'):
+        return serialize_object(
             src,
             fields=fields,
             include=include,
