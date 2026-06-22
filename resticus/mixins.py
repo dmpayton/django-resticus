@@ -1,3 +1,5 @@
+from django.utils.translation import gettext as _
+
 from . import http
 from .utils import patch_form
 
@@ -17,6 +19,16 @@ class ListModelMixin(object):
         """
         queryset = self.get_queryset()
         queryset = self.filter_queryset(queryset)
+
+        orderby = self.request.GET.get("orderby", None)
+        if orderby:
+            if hasattr(queryset.model, orderby.lstrip("-")):
+                queryset = queryset.order_by(orderby)
+
+            else:
+                msg = _("{} is not a valid sort parameter.".format(orderby))
+                return http.Http400(reason=msg)
+
         queryset = self.paginate_queryset(queryset)
 
         response = {"data": self.serialize(queryset)}
