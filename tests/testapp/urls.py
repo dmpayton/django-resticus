@@ -31,6 +31,7 @@ urlpatterns = [
         name='fail_view'),
     path('echo-view/', EchoView.as_view(),
         name='echo_view'),
+    path('csrf-probe/', CsrfProbe.as_view(), name='csrf_probe'),
     path('error-raising-view/', ErrorRaisingView.as_view(),
         name='error_raising_view'),
     path('.*', WildcardHandler.as_view()),

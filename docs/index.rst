@@ -108,6 +108,25 @@ same, and return the serialized User object back to the authenticated user::
 
     url(r'^login/$', restless.auth.AuthenticateEndpoint.as_view())
 
+Authentication and CSRF
+^^^^^^^^^^^^^^^^^^^^^^^
+
+When Django's session middleware has already signed the user in, unsafe
+requests (anything but GET, HEAD, OPTIONS and TRACE) must pass Django's CSRF
+check, so send the ``csrftoken`` cookie's value in an ``X-CSRFToken`` header.
+The check is skipped when one of the view's other authenticators (such as
+:py:class:`resticus.auth.TokenAuth` or :py:class:`resticus.auth.BasicHttpAuth`)
+also accepts the request's own credentials, because another site can't make a
+browser attach those.
+
+That makes this a rule for custom authenticators: only accept credentials the
+browser doesn't send on its own, such as an ``Authorization`` header. An
+authenticator that reads a cookie (a JWT stored in a cookie, for example) would
+let cookie-only requests skip the CSRF check. If you need one, subclass
+:py:class:`resticus.auth.SessionAuth` (so it doesn't count as a reason to
+skip the check) and call :py:func:`resticus.auth.enforce_csrf` in its
+``authenticate``, as ``SessionAuth`` does.
+
 Model serialization
 -------------------
 
