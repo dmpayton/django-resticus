@@ -11,7 +11,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import View
 
 from . import exceptions, http
-from .auth import SessionAuth, TokenAuth
+from .auth import SessionAuth, TokenAuth, enforce_csrf
 from .compat import get_user_model
 from .parsers import parse_content_type
 from .permissions import AllowAny
@@ -83,10 +83,18 @@ class Endpoint(View):
         request.authenticator = None
 
         try:
-            if request.user.is_authenticated:
-                return request.user
+            session_authenticated = request.user.is_authenticated
         except AttributeError:
-            pass
+            session_authenticated = False
+
+        if session_authenticated:
+            # Signed in by Django's session middleware. A cross-site page can
+            # make the browser send that cookie, so unsafe requests must pass
+            # the CSRF check, unless they also carry their own credentials
+            # (e.g. a token), which a cross-site page can't attach.
+            if not self._authenticated_without_session(request):
+                enforce_csrf(request)
+            return request.user
 
         for authenticator in self.get_authenticators():
             user = authenticator.authenticate(request)
@@ -101,6 +109,22 @@ class Endpoint(View):
             raise exceptions.AuthenticationFailed(msg)
 
         return AnonymousUser()
+
+    def _authenticated_without_session(self, request):
+        """
+        Whether a configured authenticator other than the session accepts
+        the request's own credentials. Invalid credentials count as none.
+        """
+        for authenticator in self.get_authenticators():
+            if isinstance(authenticator, SessionAuth):
+                continue
+            try:
+                user = authenticator.authenticate(request)
+            except exceptions.AuthenticationFailed:
+                continue
+            if user and user.is_authenticated:
+                return True
+        return False
 
     def get_authenticators(self):
         """
