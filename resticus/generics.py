@@ -1,5 +1,5 @@
 from django.core import paginator
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.forms.models import modelform_factory
 from django.utils.translation import gettext as _
 
@@ -69,7 +69,9 @@ class GenericEndpoint(Endpoint):
 
         try:
             obj = queryset.get(**lookup)
-        except self.model.DoesNotExist:
+        except (queryset.model.DoesNotExist, ValueError, TypeError, ValidationError):
+            # A value the lookup field can't take (e.g. "abc" for an integer or UUID key)
+            # can't name an object either, so it answers the same 404 as a missing one.
             raise exceptions.NotFound(_("Resource not found"))
 
         self.check_object_permissions(self.request, obj)

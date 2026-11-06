@@ -14,6 +14,7 @@ from .forms import *
 __all__ = ['AuthorList', 'AuthorDetail', 'PublisherList', 'PublisherDetail',
     'ReadOnlyPublisherList', 'BookList', 'BookDetail', 'FailsIntentionally',
     'WildcardHandler', 'EchoView', 'ErrorRaisingView', 'BasicAuthEndpoint']
+__all__ += ['QuerysetPublisherDetail']
 
 
 class AuthorList(generics.ListCreateEndpoint):
@@ -33,6 +34,11 @@ class PublisherList(generics.ListCreateEndpoint):
 
 class PublisherDetail(generics.DetailUpdateDeleteEndpoint):
     model = Publisher
+
+
+class QuerysetPublisherDetail(generics.DetailEndpoint):
+    """Declares only a queryset, no model."""
+    queryset = Publisher.objects.all()
 
 
 class ReadOnlyPublisherList(generics.DetailEndpoint):

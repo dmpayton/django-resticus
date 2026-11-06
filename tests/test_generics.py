@@ -1,4 +1,8 @@
 from decimal import Decimal
+from unittest import mock
+
+from django.core.exceptions import ValidationError
+from django.db.models.query import QuerySet
 from django.test import TestCase
 
 from resticus.compat import json
@@ -77,3 +81,35 @@ class TestModelViews(TestCase):
         """Test the form validation errors"""
         r = self.client.post('author_list', {})
         self.assertEqual(r.status_code, 400)
+
+
+class TestLookupNotFound(TestCase):
+    """A lookup value the field can't take answers the same 404 as a missing object."""
+
+    def setUp(self):
+        self.client = ApiClient()
+        self.publisher = Publisher.objects.create(name='User Foo')
+
+    def assert_not_found(self, r):
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(r.json['errors']['detail'][0]['message'], 'Resource not found')
+
+    def test_missing_pk_is_404(self):
+        self.assert_not_found(self.client.get('publisher_detail_str', pk=self.publisher.id + 1000))
+
+    def test_unparseable_pk_is_404(self):
+        self.assert_not_found(self.client.get('publisher_detail_str', pk='abc'))
+
+    def test_validation_error_from_lookup_is_404(self):
+        # e.g. a UUIDField or DateField rejecting the value in to_python
+        with mock.patch.object(QuerySet, 'get', side_effect=ValidationError('bad')):
+            self.assert_not_found(self.client.get('publisher_detail_str', pk=self.publisher.id))
+
+    def test_queryset_only_endpoint_is_404(self):
+        # An endpoint may declare `queryset` without `model`.
+        for pk in ('abc', self.publisher.id + 1000):
+            self.assert_not_found(self.client.get('publisher_detail_queryset', pk=pk))
+
+    def test_valid_pk_still_200(self):
+        r = self.client.get('publisher_detail_str', pk=self.publisher.id)
+        self.assertEqual(r.status_code, 200)

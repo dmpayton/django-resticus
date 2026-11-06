@@ -22,6 +22,11 @@ urlpatterns = [
         name='readonly_publisher_list'),
     path('publishers/<int:pk>', PublisherDetail.as_view(),
         name='publisher_detail'),
+    # No converter, so a value the pk can't take reaches get_object.
+    path('publishers/by-str/<pk>', PublisherDetail.as_view(),
+        name='publisher_detail_str'),
+    path('publishers/by-queryset/<pk>', QuerysetPublisherDetail.as_view(),
+        name='publisher_detail_queryset'),
 
     path('books/', BookList.as_view(), name='book_list'),
     path('books/<int:isbn>', BookDetail.as_view(),
