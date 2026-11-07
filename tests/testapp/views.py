@@ -1,5 +1,7 @@
 import base64
 
+from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
+
 from resticus import generics
 from resticus.auth import login_required, BasicHttpAuth
 from resticus.exceptions import HttpError
@@ -92,3 +94,19 @@ class BasicAuthEndpoint(Endpoint):
     @login_required
     def get(self, request):
         return serialize(request.user)
+
+
+__all__ += ['RaisesValidationError']
+
+
+class RaisesValidationError(Endpoint):
+    """Raises a Django ValidationError for dispatch to turn into a 400."""
+
+    ERRORS = {
+        'single': lambda: ValidationError("'%(value)s' is bad.", params={'value': 'x'}),
+        'list': lambda: ValidationError(['one', 'two']),
+        'dict': lambda: ValidationError({'name': ['Required.'], NON_FIELD_ERRORS: ['Clash.']}),
+    }
+
+    def get(self, request):
+        raise self.ERRORS[request.GET['kind']]()

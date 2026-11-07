@@ -38,5 +38,7 @@ urlpatterns = [
         name='echo_view'),
     path('error-raising-view/', ErrorRaisingView.as_view(),
         name='error_raising_view'),
+    path('validation-error/', RaisesValidationError.as_view(),
+        name='validation_error'),
     path('.*', WildcardHandler.as_view()),
 ]
