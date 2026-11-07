@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.contrib import auth
 from django.contrib.auth.models import AnonymousUser
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import NON_FIELD_ERRORS, PermissionDenied, ValidationError
 from django.http import HttpResponse, JsonResponse, StreamingHttpResponse, Http404
 from django.template.response import TemplateResponse
 
@@ -19,6 +19,19 @@ from .serializers import serialize
 from .settings import api_settings
 
 __all__ = ["Endpoint", "SessionAuthEndpoint", "TokenAuthEndpoint", "OpenAPISchemaView", "DocsView"]
+
+
+def validation_errors(err):
+    """A Django ValidationError as resticus's errors shape: every message, with its
+    params filled in. Field errors are keyed by field; the rest go under "detail"."""
+    if hasattr(err, "error_dict"):
+        return {
+            ("detail" if field == NON_FIELD_ERRORS else field): [
+                {"message": str(message)} for message in messages
+            ]
+            for field, messages in err.message_dict.items()
+        }
+    return {"detail": [{"message": str(message)} for message in err.messages]}
 
 
 class Endpoint(View):
@@ -172,7 +185,7 @@ class Endpoint(View):
             response = self.authentication_failed(err)
 
         except ValidationError as err:
-            return http.Http400(err.message)
+            return http.Http400({"errors": validation_errors(err)})
 
         except exceptions.APIException as err:
             response = self.api_exception(err)
