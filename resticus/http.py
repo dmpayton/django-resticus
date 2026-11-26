@@ -3,6 +3,7 @@ import traceback
 
 from django import http
 from django.conf import settings
+from django.utils.functional import Promise
 from django.utils.translation import gettext as _
 
 from .settings import api_settings
@@ -50,8 +51,11 @@ class JSONErrorResponse(JSONResponse):
 
     def __init__(self, reason=None, **kwargs):
         data = reason or self.default_reason
+        if isinstance(data, Promise):
+            # A lazy translation (e.g. a ValidationError message) is a string too.
+            data = str(data)
         if data is None or isinstance(data, str):
-            data = {"errors": {"detail": [{"message": reason or self.default_reason}],}}
+            data = {"errors": {"detail": [{"message": data}],}}
 
         if settings.DEBUG:
             exc = sys.exc_info()

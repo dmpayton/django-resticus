@@ -1,5 +1,7 @@
 import base64
 
+from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
+
 from resticus import generics
 from resticus.auth import login_required, BasicHttpAuth, TokenAuth
 from resticus.exceptions import HttpError
@@ -15,6 +17,7 @@ __all__ = ['AuthorList', 'AuthorDetail', 'PublisherList', 'PublisherDetail',
     'ReadOnlyPublisherList', 'BookList', 'BookDetail', 'FailsIntentionally',
     'WildcardHandler', 'EchoView', 'ErrorRaisingView', 'BasicAuthEndpoint',
     'CsrfProbe']
+__all__ += ['QuerysetPublisherDetail']
 
 
 class AuthorList(generics.ListCreateEndpoint):
@@ -34,6 +37,11 @@ class PublisherList(generics.ListCreateEndpoint):
 
 class PublisherDetail(generics.DetailUpdateDeleteEndpoint):
     model = Publisher
+
+
+class QuerysetPublisherDetail(generics.DetailEndpoint):
+    """Declares only a queryset, no model."""
+    queryset = Publisher.objects.all()
 
 
 class ReadOnlyPublisherList(generics.DetailEndpoint):
@@ -101,3 +109,19 @@ class CsrfProbe(Endpoint):
         }
 
     post = put = patch = delete = get
+
+
+__all__ += ['RaisesValidationError']
+
+
+class RaisesValidationError(Endpoint):
+    """Raises a Django ValidationError for dispatch to turn into a 400."""
+
+    ERRORS = {
+        'single': lambda: ValidationError("'%(value)s' is bad.", params={'value': 'x'}),
+        'list': lambda: ValidationError(['one', 'two']),
+        'dict': lambda: ValidationError({'name': ['Required.'], NON_FIELD_ERRORS: ['Clash.']}),
+    }
+
+    def get(self, request):
+        raise self.ERRORS[request.GET['kind']]()
