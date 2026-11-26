@@ -3,7 +3,7 @@ import base64
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 
 from resticus import generics
-from resticus.auth import login_required, BasicHttpAuth
+from resticus.auth import login_required, BasicHttpAuth, TokenAuth
 from resticus.exceptions import HttpError
 from resticus.http import Http201, Http403, Http404, Http400
 from resticus.serializers import serialize
@@ -15,7 +15,8 @@ from .forms import *
 
 __all__ = ['AuthorList', 'AuthorDetail', 'PublisherList', 'PublisherDetail',
     'ReadOnlyPublisherList', 'BookList', 'BookDetail', 'FailsIntentionally',
-    'WildcardHandler', 'EchoView', 'ErrorRaisingView', 'BasicAuthEndpoint']
+    'WildcardHandler', 'EchoView', 'ErrorRaisingView', 'BasicAuthEndpoint',
+    'CsrfProbe']
 __all__ += ['QuerysetPublisherDetail']
 
 
@@ -94,6 +95,20 @@ class BasicAuthEndpoint(Endpoint):
     @login_required
     def get(self, request):
         return serialize(request.user)
+
+
+class CsrfProbe(Endpoint):
+    authentication_classes = (TokenAuth, BasicHttpAuth)
+
+    def get(self, request):
+        user = request.user
+        data = request.data if hasattr(request.data, 'get') else {}
+        return {
+            'username': user.username if user.is_authenticated else None,
+            'name': data.get('name'),
+        }
+
+    post = put = patch = delete = get
 
 
 __all__ += ['RaisesValidationError']

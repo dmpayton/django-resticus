@@ -2,7 +2,8 @@ import base64
 
 from django.conf import settings
 from django.contrib import auth
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, TooManyFieldsSent, TooManyFilesSent
+from django.http.multipartparser import MultiPartParserError
 from django.middleware.csrf import CsrfViewMiddleware
 from django.utils.encoding import DjangoUnicodeDecodeError
 from django.utils.translation import gettext as _
@@ -13,7 +14,13 @@ from .http import HTTP_HEADER_ENCODING, Http200
 from .settings import api_settings
 
 
-__all__ = ["SessionAuth", "BasicHttpAuth", "SessionAuthEndpoint", "login_required"]
+__all__ = [
+    "SessionAuth",
+    "BasicHttpAuth",
+    "SessionAuthEndpoint",
+    "enforce_csrf",
+    "login_required",
+]
 
 
 def get_authorization_header(request):
@@ -36,7 +43,34 @@ class CSRFCheck(CsrfViewMiddleware):
         return reason
 
 
+def enforce_csrf(request):
+    """
+    Run Django's CSRF check on a request. Safe methods pass; an unsafe
+    request without a valid CSRF token raises Forbidden.
+    """
+    check = CSRFCheck()
+    check.process_request(request)
+    try:
+        # For POST this reads request.POST, which parses the body.
+        reason = check.process_view(request, None, (), {})
+    except (MultiPartParserError, TooManyFieldsSent, TooManyFilesSent):
+        raise exceptions.ParseError()
+    if reason:
+        raise exceptions.Forbidden(_("CSRF Failed: {0}").format(reason))
+
+
 class BaseAuth(object):
+    """
+    Base class for authenticators.
+
+    For a user the session already signed in, Endpoint skips the CSRF check
+    when any authenticator other than SessionAuth accepts the request. So
+    only accept credentials a browser doesn't send on its own (such as an
+    Authorization header). An authenticator that reads a cookie should
+    subclass SessionAuth and call enforce_csrf(request) in authenticate(),
+    or cookie-only requests skip the CSRF check.
+    """
+
     def authenticate(self, request):
         pass
 
@@ -58,11 +92,7 @@ class SessionAuth(BaseAuth):
         return user
 
     def enforce_csrf(self, request):
-        check = CSRFCheck()
-        check.process_request(request)
-        reason = check.process_view(request, None, (), {})
-        if reason:
-            raise exceptions.Forbidden(_("CSRF Failed: {0}").format(reason))
+        enforce_csrf(request)
 
 
 class BasicHttpAuth(BaseAuth):
@@ -145,7 +175,7 @@ class TokenAuth(BaseAuth):
         encoding = request.encoding or settings.DEFAULT_CHARSET
         try:
             return User.objects.get(api_token__key=key.decode(encoding))
-        except User.DoesNotExist:
+        except (User.DoesNotExist, UnicodeDecodeError):
             raise exceptions.AuthenticationFailed(_("Invalid token."))
 
     def authenticate_credentials(self, request, key):

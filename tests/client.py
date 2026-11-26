@@ -57,6 +57,13 @@ class ApiClient(Client):
                 reverse(url_name, args=args, kwargs=kwargs),
                 content_type=content_type, data=data, follow=follow, **extra))
 
+    def patch(self, url_name, data={}, content_type=MULTIPART_CONTENT,
+            follow=False, extra={}, *args, **kwargs):
+        return self.process(
+            super(ApiClient, self).patch(
+                reverse(url_name, args=args, kwargs=kwargs),
+                content_type=content_type, data=data, follow=follow, **extra))
+
     def delete(self, url_name, data={}, content_type=MULTIPART_CONTENT,
             follow=False, extra={}, *args, **kwargs):
         return self.process(
