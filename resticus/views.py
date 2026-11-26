@@ -18,6 +18,9 @@ from .permissions import AllowAny
 from .serializers import serialize
 from .settings import api_settings
 
+# Methods Django's CSRF check always lets through.
+SAFE_METHODS = ("GET", "HEAD", "OPTIONS", "TRACE")
+
 __all__ = ["Endpoint", "SessionAuthEndpoint", "TokenAuthEndpoint", "OpenAPISchemaView", "DocsView"]
 
 
@@ -91,8 +94,11 @@ class Endpoint(View):
             # Signed in by Django's session middleware. A cross-site page can
             # make the browser send that cookie, so unsafe requests must pass
             # the CSRF check, unless they also carry their own credentials
-            # (e.g. a token), which a cross-site page can't attach.
-            if not self._authenticated_without_session(request):
+            # (e.g. a token), which a cross-site page can't attach. Safe
+            # methods pass the check anyway, so skip the lookup for them.
+            if request.method not in SAFE_METHODS and not self._authenticated_without_session(
+                request
+            ):
                 enforce_csrf(request)
             return request.user
 

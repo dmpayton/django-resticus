@@ -1,9 +1,9 @@
 import base64
 import json
 
+from django.contrib.auth.signals import user_login_failed
 from django.test import RequestFactory, TestCase
 from django.test.client import encode_multipart
-from django.urls import reverse
 
 from resticus.auth import TokenAuth
 from resticus.parsers import parse_multipart
@@ -53,8 +53,7 @@ class TestSessionCsrf(TestCase):
     def test_session_put_patch_delete_without_csrf_rejected(self):
         self.sign_in()
         self.assertCsrfRejected(self.client.put('csrf_probe'))
-        self.assertCsrfRejected(
-            ApiClient.process(super(ApiClient, self.client).patch(reverse('csrf_probe'))))
+        self.assertCsrfRejected(self.client.patch('csrf_probe'))
         self.assertCsrfRejected(self.client.delete('csrf_probe'))
 
     def test_session_post_with_csrf_accepted(self):
@@ -120,10 +119,35 @@ class TestSessionCsrf(TestCase):
         r = self.client.post('csrf_probe', extra={'HTTP_AUTHORIZATION': 'Token'})
         self.assertCsrfRejected(r)
 
+    def test_token_only_undecodable_key_rejected(self):
+        r = self.client.post('csrf_probe', extra={'HTTP_AUTHORIZATION': 'Token \xff\xfe'})
+        self.assertEqual(r.status_code, 401)
+
+    def test_session_and_undecodable_token_checks_csrf(self):
+        self.sign_in()
+        r = self.client.post('csrf_probe', extra=dict(
+            self.with_csrf(), HTTP_AUTHORIZATION='Token \xff\xfe'))
+        self.assertUsername(r, 'foo')
+
     def test_session_and_valid_basic_skips_csrf(self):
         self.sign_in()
         r = self.client.post('csrf_probe', extra={'HTTP_AUTHORIZATION': basic('baz', 'qux')})
         self.assertUsername(r, 'foo')
+
+    def test_session_get_skips_credential_lookup(self):
+        failed = []
+
+        def record(sender, **kwargs):
+            failed.append(kwargs)
+
+        user_login_failed.connect(record)
+        try:
+            self.sign_in()
+            r = self.client.get('csrf_probe', extra={'HTTP_AUTHORIZATION': basic('baz', 'wrong')})
+        finally:
+            user_login_failed.disconnect(record)
+        self.assertUsername(r, 'foo')
+        self.assertEqual(failed, [])
 
     def test_anonymous_post_unaffected(self):
         r = self.client.post('echo_view')
