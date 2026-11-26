@@ -2,7 +2,8 @@ import base64
 
 from django.conf import settings
 from django.contrib import auth
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, TooManyFieldsSent, TooManyFilesSent
+from django.http.multipartparser import MultiPartParserError
 from django.middleware.csrf import CsrfViewMiddleware
 from django.utils.encoding import DjangoUnicodeDecodeError
 from django.utils.translation import gettext as _
@@ -13,7 +14,13 @@ from .http import HTTP_HEADER_ENCODING, Http200
 from .settings import api_settings
 
 
-__all__ = ["SessionAuth", "BasicHttpAuth", "SessionAuthEndpoint", "login_required"]
+__all__ = [
+    "SessionAuth",
+    "BasicHttpAuth",
+    "SessionAuthEndpoint",
+    "enforce_csrf",
+    "login_required",
+]
 
 
 def get_authorization_header(request):
@@ -34,6 +41,22 @@ class CSRFCheck(CsrfViewMiddleware):
 
     def _reject(self, request, reason):
         return reason
+
+
+def enforce_csrf(request):
+    """
+    Run Django's CSRF check on a request. Safe methods pass; an unsafe
+    request without a valid CSRF token raises Forbidden.
+    """
+    check = CSRFCheck()
+    check.process_request(request)
+    try:
+        # For POST this reads request.POST, which parses the body.
+        reason = check.process_view(request, None, (), {})
+    except (MultiPartParserError, TooManyFieldsSent, TooManyFilesSent):
+        raise exceptions.ParseError()
+    if reason:
+        raise exceptions.Forbidden(_("CSRF Failed: {0}").format(reason))
 
 
 class BaseAuth(object):
@@ -58,11 +81,7 @@ class SessionAuth(BaseAuth):
         return user
 
     def enforce_csrf(self, request):
-        check = CSRFCheck()
-        check.process_request(request)
-        reason = check.process_view(request, None, (), {})
-        if reason:
-            raise exceptions.Forbidden(_("CSRF Failed: {0}").format(reason))
+        enforce_csrf(request)
 
 
 class BasicHttpAuth(BaseAuth):
