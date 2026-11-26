@@ -25,12 +25,15 @@ def parse_plain_text(request, **extra):
 
 def parse_json(request, **extra):
     charset = extra.get("charset", "utf-8")
-    try:
-        data = request.body.decode(charset)
-        return (api_settings.JSON_DECODER().decode(data), None)
-    except Exception:
-        raise ParseError()
-
+    if request.body:
+        try:
+            data = request.body.decode(charset)
+            if data:
+                return (api_settings.JSON_DECODER().decode(data), None)
+            return (None, None)
+        except Exception:
+            raise ParseError()
+    return None
 
 def parse_form_encoded(request, **extra):
     return (request.POST, None)

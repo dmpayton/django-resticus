@@ -125,6 +125,14 @@ class TestEndpoint(TestCase):
         # invalid JSON and will return 400 instead of 200.
         self.assertEqual(r.status_code, 200)
 
+    def test_empty_post_body_not_encoded(self):
+        """Test that an empty POST body does not get encoded"""
+        r = self.client.post('echo_view', extra={
+            'CONTENT_TYPE': 'application/json'})
+        # If an empty POST request body is not ignored, it (empty string) will be an
+        # invalid JSON and will return 400 instead of 200.
+        self.assertEqual(r.status_code, 200)
+
     def test_raising_http_error_returns_it(self):
         r = self.client.get('error_raising_view')
         self.assertEqual(r.status_code, 400)
