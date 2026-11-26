@@ -24,6 +24,22 @@ class TestEndpoint(TestCase):
         self.assertEqual(len(r.json['data']), 1)
         self.assertEqual(r.json['data'][0]['id'], self.author.id)
 
+    def test_author_list_orderby(self):
+        """Exercise passing orderby parameter to a list endpoint GET request"""
+
+        author = Author.objects.create(name='Author Bar')
+
+        r = self.client.get('author_list', {'orderby': 'name'})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.json['data']), 2)
+        self.assertEqual(r.json['data'][0]['id'], author.id)
+
+    def test_invalid_orderby_parameter(self):
+        """Exercise passing an invalid orderby parameter results in an error"""
+
+        r = self.client.get('author_list', {'orderby': 'foo'})
+        self.assertEqual(r.status_code, 400)
+
     def test_author_details(self):
         """Exercise passing parameters to GET request"""
 
